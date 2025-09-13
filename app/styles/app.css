@@ -7,7 +7,7 @@ body {
     -apple-system,
     Arial,
     Helvetica,
-    sans-serif;
+    /* Delete test group icon button */ sans-serif;
   font-size: 14px;
   margin: 0;
   overflow: hidden;
@@ -109,6 +109,8 @@ body,
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
   display: flex;
   flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0; /* allow internal scroll */
 }
 @media (prefers-color-scheme: dark) {
   .patient-page {
@@ -135,7 +137,12 @@ body,
   display: flex;
   flex-direction: column;
   justify-content: flex-start;
+  flex: 1 1 auto;
+  overflow-y: auto;
+  min-height: 0;
 }
+
+/* Removed internal test groups scroll wrapper; panel-body now scrolls */
 
 .form-grid {
   display: grid;
@@ -264,6 +271,7 @@ body,
 .test-rows {
   display: flex;
   flex-direction: column;
+  justify-content: flex-start;
   gap: 8px;
 }
 .test-row {
@@ -286,23 +294,22 @@ body,
   border-color: #b8d6f2;
 }
 @media (prefers-color-scheme: dark) {
-  .test-row:hover {
+  .test-row-main:hover {
     background: #313f4a;
     border-color: #4b6a81;
   }
 }
-.test-row.selected {
+.test-row-main.selected {
   border-color: #0078d4;
-  box-shadow: 0 0 0 1px #0078d4 inset;
 }
 .test-row-main {
-  /* display: flex; */
+  padding: 8px;
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  border-radius: 4px;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  /* flex-wrap: wrap; */
+  grid-template-columns: repeat(3, 1fr);
+  border-color: #2d2d2d;
+  box-shadow: 0 0 0 1px #2d2d2d inset;
 }
 .test-row-check {
   margin: 0;
@@ -316,6 +323,11 @@ body,
   /* font-size: 12px; */
   /* min-width: 140px; */
   vertical-align: middle;
+}
+.test-row-result-placeholder {
+  width: 140px;
+  height: 1px; /* collapse height but reserve horizontal space */
+  visibility: hidden;
 }
 .test-row-result {
   width: 140px;
@@ -465,6 +477,11 @@ body,
 .radio-option:active .radio-bullet {
   background: #dcecf8;
 }
+.test-groups {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+}
 @media (prefers-color-scheme: dark) {
   .radio-option .radio-bullet {
     background: #2b2b2b;
@@ -485,5 +502,50 @@ body,
   }
   .radio-option:active .radio-bullet {
     background: #254559;
+  }
+}
+
+/* Add test group button */
+.add-test-group-btn {
+  background: transparent;
+  border: 1px dashed #7a7a7a;
+  color: #0078d4;
+  padding: 6px 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+  transition:
+    background 0.15s,
+    border-color 0.15s,
+    color 0.15s;
+}
+.add-test-group-btn:hover {
+  background: #eef6fc;
+  border-color: #0078d4;
+}
+.add-test-group-btn:active {
+  background: #d7ecfa;
+  border-color: #006bbd;
+}
+.add-test-group-btn:focus-visible {
+  outline: 2px solid #0078d4;
+  outline-offset: 2px;
+}
+@media (prefers-color-scheme: dark) {
+  .add-test-group-btn {
+    border-color: #5a5a5a;
+    color: #1182dc;
+  }
+  .add-test-group-btn:hover {
+    background: #1f3a4d;
+    border-color: #1182dc;
+  }
+  .add-test-group-btn:active {
+    background: #254559;
+    border-color: #0b6db5;
+  }
+  .add-test-group-btn:focus-visible {
+    outline: 2px solid #1182dc;
   }
 }

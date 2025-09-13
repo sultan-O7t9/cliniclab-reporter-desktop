@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react'
+import React, { useState, useEffect } from 'react'
 // Removed shared Button for custom Windows 10 styled print button
 
 interface PatientForm {
@@ -7,14 +7,22 @@ interface PatientForm {
   sex: string
 }
 
-const initialState: PatientForm = { name: '', age: '', sex: 'Female' }
+const initialState: PatientForm = { name: 'Sultan', age: '25', sex: 'Male' }
+
+interface TestGroup {
+  id: string
+  category: string
+  tests: any[]
+  selected: Record<string, { result: string }>
+  loading: boolean
+}
 
 export const PatientPage: React.FC = () => {
   const [form, setForm] = useState<PatientForm>(initialState)
-  const [category, setCategory] = useState('')
   const [categories, setCategories] = useState<string[]>([])
-  const [tests, setTests] = useState<any[]>([])
-  const [selectedTests, setSelectedTests] = useState<Record<string, { result: string }>>({})
+  const [groups, setGroups] = useState<TestGroup[]>([
+    { id: 'g-1', category: '', tests: [], selected: {}, loading: false },
+  ])
 
   useEffect(() => {
     let mounted = true
@@ -27,64 +35,110 @@ export const PatientPage: React.FC = () => {
     }
   }, [])
 
-  useEffect(() => {
-    if (!category) {
-      setTests([])
-      return
-    }
-    let mounted = true
-    window.conveyor.app
-      .testsByCategory(category)
-      .then((rows) => mounted && setTests(rows))
-      .catch((e) => console.error('Failed to load tests', e))
-    return () => {
-      mounted = false
-    }
-  }, [category])
-
-  const visibleTests = useMemo(() => tests, [tests])
+  const groupVisibleTests = (g: TestGroup) => g.tests
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value } = e.target
     setForm((f) => ({ ...f, [name]: value }))
   }
 
-  const handleCategoryChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    setCategory(e.target.value)
+  const handleCategoryChange = (groupId: string, e: React.ChangeEvent<HTMLSelectElement>) => {
+    const value = e.target.value
+    loadTestsForGroup(groupId, value)
   }
 
-  const toggleTest = (testName: string) => {
-    setSelectedTests((prev) => {
-      const copy = { ...prev }
-      if (copy[testName]) {
-        delete copy[testName]
-      } else {
-        copy[testName] = { result: '' }
-      }
-      return copy
+  const loadTestsForGroup = (groupId: string, category: string) => {
+    setGroups((gs) =>
+      gs.map((g) => (g.id === groupId ? { ...g, category, loading: !!category, tests: [], selected: {} } : g))
+    )
+    if (!category) return
+    let mounted = true
+    window.conveyor.app
+      .testsByCategory(category)
+      .then((rows) => {
+        if (!mounted) return
+        setGroups((gs) => gs.map((g) => (g.id === groupId ? { ...g, tests: rows, loading: false } : g)))
+      })
+      .catch((e) => {
+        console.error('Failed to load tests', e)
+        setGroups((gs) => gs.map((g) => (g.id === groupId ? { ...g, loading: false } : g)))
+      })
+    return () => {
+      mounted = false
+    }
+  }
+
+  const toggleTest = (groupId: string, testName: string) => {
+    setGroups((gs) =>
+      gs.map((g) => {
+        if (g.id !== groupId) return g
+        const selected = { ...g.selected }
+        if (selected[testName]) delete selected[testName]
+        else selected[testName] = { result: '' }
+        return { ...g, selected }
+      })
+    )
+  }
+
+  const updateResult = (groupId: string, testName: string, value: string) => {
+    setGroups((gs) =>
+      gs.map((g) => (g.id === groupId ? { ...g, selected: { ...g.selected, [testName]: { result: value } } } : g))
+    )
+  }
+
+  const addGroup = () => {
+    setGroups((gs) => [...gs, { id: `g-${gs.length + 1}`, category: '', tests: [], selected: {}, loading: false }])
+  }
+
+  const removeGroup = (groupId: string) => {
+    setGroups((gs) => {
+      if (gs.length === 1) return [{ id: 'g-1', category: '', tests: [], selected: {}, loading: false }]
+      return gs.filter((g) => g.id !== groupId)
     })
-  }
-
-  const updateResult = (testName: string, value: string) => {
-    setSelectedTests((prev) => ({ ...prev, [testName]: { result: value } }))
   }
 
   const handlePrint = () => {
-    const chosen = Object.keys(selectedTests).map((name) => {
-      const meta = tests.find((t) => t.name === name) || {}
-      return {
-        name,
-        result: selectedTests[name].result,
-        normal: meta.normal_value || meta.normal || '',
-        category: meta.category || category,
-      }
-    })
+    const testsPayload = groups
+      .filter((g) => g.category)
+      .map((g) => {
+        const chosen = Object.keys(g.selected).map((name) => {
+          const meta = g.tests.find((t) => t.name === name) || {}
+          const result = g.selected[name].result.trim() ? g.selected[name].result : '-'
+          return {
+            name,
+            result,
+            normal: (meta as any).normal_value || (meta as any).normal || '',
+            category: (meta as any).category || g.category,
+          }
+        })
+        return {
+          category: g.category,
+          tests: [...chosen],
+        }
+      })
+      .filter((g) => g.tests.length)
+    if (!testsPayload.length) {
+      console.warn('[Report] No test results entered; nothing to print.')
+      return
+    }
     const report = {
       patient: { ...form },
-      tests: [{ category, tests: chosen }],
+      tests: testsPayload,
       generatedAt: new Date().toISOString(),
     }
     console.warn('[Report]', report)
+    window.conveyor.app
+      .saveTestRecord(report)
+      .then(async (res: any) => {
+        console.warn('[Report Saved] id=', res?.id)
+        try {
+          const pdfRes = await window.conveyor.app.generateReportPdf(report)
+          console.warn('[Report PDF] file=', pdfRes?.filePath)
+        } catch (e) {
+          console.error('Failed to generate PDF', e)
+        }
+      })
+      .catch((err: any) => console.error('Failed to save test record', err))
   }
 
   return (
@@ -127,66 +181,125 @@ export const PatientPage: React.FC = () => {
           </div>
         </div>
         <div className="divider" role="separator" />
-        <div className="form-grid" style={{ marginTop: 24 }}>
-          <div className="form-field">
-            <label htmlFor="testCategory">Test</label>
-            <select id="testCategory" value={category} onChange={handleCategoryChange}>
-              <option value="">Select</option>
-              {categories.map((c) => (
-                <option key={c} value={c}>
-                  {c}
-                </option>
-              ))}
-            </select>
-          </div>
-        </div>
-        {category && (
-          <div className="test-rows" style={{ marginTop: 20 }}>
-            {visibleTests.map((t) => {
-              const checked = !!selectedTests[t.name]
-              const checkboxId = `test-${t.name.replace(/\s+/g, '-').toLowerCase()}`
+        <div>
+          <div className="test-groups">
+            {groups.map((g, gi) => {
+              const tests = groupVisibleTests(g)
               return (
-                <div key={t.name} className={`test-row ${checked ? 'selected' : ''}`}>
-                  <div className="test-row-main">
-                    <label
-                      htmlFor={checkboxId}
-                      className="test-row-label"
-                      style={{ display: 'flex', alignItems: 'center', gap: 12, cursor: 'pointer' }}
+                <div key={g.id} style={{ marginTop: gi === 0 ? 24 : 32 }}>
+                  <div className="form-grid" style={{ position: 'relative' }}>
+                    <div className="form-field" style={{ paddingRight: 32 }}>
+                      <label htmlFor={`testCategory-${g.id}`}>Test</label>
+                      <select
+                        id={`testCategory-${g.id}`}
+                        value={g.category}
+                        onChange={(e) => handleCategoryChange(g.id, e)}
+                      >
+                        <option value="">Select</option>
+                        {categories.map((c) => (
+                          <option key={c} value={c}>
+                            {c}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <button
+                      type="button"
+                      className="delete-group-btn"
+                      onClick={() => removeGroup(g.id)}
+                      aria-label="Delete Test Group"
+                      title="Delete this test category group"
+                      tabIndex={-1}
+                      style={{ position: 'absolute', top: 0, right: 0, cursor: 'pointer' }}
                     >
-                      <input
-                        id={checkboxId}
-                        type="checkbox"
-                        className="test-row-check"
-                        checked={checked}
-                        onChange={() => toggleTest(t.name)}
-                        aria-label={`Select ${t.name}`}
-                      />
-                      <div className="test-row-name">{t.name}</div>
-                    </label>
-                    {checked ? (
-                      <input
-                        type="text"
-                        className="test-row-result"
-                        placeholder="Result"
-                        value={selectedTests[t.name]?.result || ''}
-                        onChange={(e) => updateResult(t.name, e.target.value)}
-                      />
-                    ) : (
-                      <div></div>
-                    )}
-                    <div className="test-row-normal">{t.normal_value || t.normal || ''}</div>
+                      <svg
+                        aria-hidden="true"
+                        width="16"
+                        height="16"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      >
+                        <polyline points="3 6 5 6 21 6" />
+                        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                        <line x1="10" y1="11" x2="10" y2="17" />
+                        <line x1="14" y1="11" x2="14" y2="17" />
+                      </svg>
+                    </button>
                   </div>
+                  {g.category && tests.length > 0 && (
+                    <div className="test-rows" style={{ marginTop: 20 }}>
+                      {tests.map((t) => {
+                        const checked = !!g.selected[t.name]
+                        const checkboxId = `test-${g.id}-${t.name.replace(/\s+/g, '-').toLowerCase()}`
+                        return (
+                          <div>
+                            <div className={'test-row-main' + (checked ? ' selected' : '')}>
+                              <label
+                                htmlFor={checkboxId}
+                                className="test-row-label"
+                                style={{ display: 'flex', alignItems: 'center', gap: 12, cursor: 'pointer' }}
+                              >
+                                <input
+                                  id={checkboxId}
+                                  type="checkbox"
+                                  className="test-row-check"
+                                  checked={checked}
+                                  onChange={() => toggleTest(g.id, t.name)}
+                                  onKeyDown={(e) => {
+                                    if (e.key === 'Enter') {
+                                      e.preventDefault()
+                                      toggleTest(g.id, t.name)
+                                    }
+                                  }}
+                                  aria-label={`Select ${t.name}`}
+                                />
+                                <div className="test-row-name">{t.name}</div>
+                              </label>
+                              {checked ? (
+                                <input
+                                  type="text"
+                                  className="test-row-result"
+                                  placeholder="Result"
+                                  value={g.selected[t.name]?.result || ''}
+                                  onChange={(e) => updateResult(g.id, t.name, e.target.value)}
+                                />
+                              ) : (
+                                <div className="test-row-result-placeholder" />
+                              )}
+                              <p>{t.normal_value || t.normal || ''}</p>
+                            </div>
+                            <p></p>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )}
+                  {g.category && tests.length === 0 && !g.loading && (
+                    <div style={{ marginTop: 12, fontSize: 12, opacity: 0.7 }}>No tests found.</div>
+                  )}
+                  {g.loading && <div style={{ marginTop: 12, fontSize: 12, opacity: 0.7 }}>Loading tests...</div>}
                 </div>
               )
             })}
+
+            <div style={{ marginTop: 16, paddingBottom: 16 }}>
+              <button type="button" className="add-test-group-btn" onClick={addGroup} aria-label="Add Test Group">
+                + Add Another Test Category
+              </button>
+            </div>
           </div>
-        )}
-        <div style={{ marginTop: 28, display: 'flex', justifyContent: 'flex-start' }}>
+        </div>
+        <div style={{ marginTop: 28, display: 'flex', justifyContent: 'flex-start', alignItems: 'flex-start' }}>
           <button
             type="button"
             className="print-report-btn"
             onClick={handlePrint}
-            disabled={!Object.keys(selectedTests).length}
+            disabled={!groups.some((g) => Object.values(g.selected).some((v) => v.result && v.result.trim().length))}
             aria-label="Print Report"
           >
             <svg

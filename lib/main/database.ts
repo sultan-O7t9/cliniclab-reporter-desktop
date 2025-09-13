@@ -43,6 +43,15 @@ export function seedDatabase() {
     timestamp TEXT DEFAULT CURRENT_TIMESTAMP
   )`)
 
+  database.exec(`CREATE TABLE IF NOT EXISTS test_records (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    patient_name TEXT,
+    patient_age INTEGER,
+    patient_sex TEXT,
+    payload TEXT NOT NULL, -- full JSON structure serialized
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+  )`)
+
   if (!hasSeed) {
     const insert = database.prepare(
       'INSERT INTO test (category, name, result, normal_value) VALUES (@category, @name, @result, @normal_value)'
