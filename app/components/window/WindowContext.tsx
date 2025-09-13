@@ -9,6 +9,8 @@ type WindowInitProps = ChannelReturn<'window-init'>
 interface WindowContextProps {
   titlebar: TitlebarProps
   readonly window: WindowInitProps | undefined
+  isMaximized: boolean
+  setIsMaximized: (v: boolean) => void
 }
 
 const WindowContext = createContext<WindowContextProps | undefined>(undefined)
@@ -26,6 +28,7 @@ export const WindowContextProvider = ({
   titlebar?: TitlebarProps
 }) => {
   const [initProps, setInitProps] = useState<WindowInitProps>()
+  const [isMaximized, setIsMaximized] = useState<boolean>(false)
   const { windowInit } = useConveyor('window')
 
   useEffect(() => {
@@ -36,8 +39,18 @@ export const WindowContextProvider = ({
     parent?.classList.add('window-frame')
   }, [windowInit])
 
+  useEffect(() => {
+    // Listen to maximize/unmaximize via custom events dispatched from preload if needed (placeholder)
+    const handler = (e: any) => {
+      if (e.detail?.type === 'maximize') setIsMaximized(true)
+      if (e.detail?.type === 'unmaximize') setIsMaximized(false)
+    }
+    window.addEventListener('win-state', handler as any)
+    return () => window.removeEventListener('win-state', handler as any)
+  }, [])
+
   return (
-    <WindowContext.Provider value={{ titlebar, window: initProps }}>
+    <WindowContext.Provider value={{ titlebar, window: initProps, isMaximized, setIsMaximized }}>
       <TitlebarContextProvider>
         <Titlebar />
       </TitlebarContextProvider>

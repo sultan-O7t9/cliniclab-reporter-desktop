@@ -11,16 +11,16 @@ export function createAppWindow(): void {
 
   // Create the main window.
   const mainWindow = new BrowserWindow({
-    width: 900,
-    height: 670,
+    width: 1200,
+    height: 800,
     show: false,
     backgroundColor: '#1c1c1c',
     icon: appIcon,
     frame: false,
     titleBarStyle: 'hiddenInset',
     title: 'Electron React App',
-    maximizable: false,
-    resizable: false,
+    maximizable: true,
+    resizable: true,
     webPreferences: {
       preload: join(__dirname, '../preload/preload.js'),
       sandbox: false,
@@ -32,7 +32,16 @@ export function createAppWindow(): void {
   registerAppHandlers(app)
 
   mainWindow.on('ready-to-show', () => {
+    // Start maximized
+    try {
+      mainWindow.maximize()
+    } catch (e) {
+      console.error('Failed to maximize window', e)
+    }
     mainWindow.show()
+    if (!app.isPackaged) {
+      mainWindow.webContents.openDevTools({ mode: 'detach' })
+    }
   })
 
   mainWindow.webContents.setWindowOpenHandler((details) => {

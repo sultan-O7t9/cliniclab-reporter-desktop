@@ -7,6 +7,7 @@ import { useConveyor } from '@/app/hooks/use-conveyor'
 const SVG_PATHS = {
   close: 'M 0,0 0,0.7 4.3,5 0,9.3 0,10 0.7,10 5,5.7 9.3,10 10,10 10,9.3 5.7,5 10,0.7 10,0 9.3,0 5,4.3 0.7,0 Z',
   maximize: 'M 0,0 0,10 10,10 10,0 Z M 1,1 9,1 9,9 1,9 Z',
+  restore: 'M2 0 H10 V8 H8 V2 H2 Z M0 2 H8 V10 H0 Z',
   minimize: 'M 0,5 10,5 10,6 0,6 Z',
 } as const
 
@@ -49,12 +50,14 @@ export const Titlebar = () => {
 }
 
 const TitlebarControls = () => {
-  const { window: wcontext } = useWindowContext()
+  const { window: wcontext, isMaximized } = useWindowContext()
 
   return (
     <div className="window-titlebar-controls">
       {wcontext?.minimizable && <TitlebarControlButton label="minimize" svgPath={SVG_PATHS.minimize} />}
-      {wcontext?.maximizable && <TitlebarControlButton label="maximize" svgPath={SVG_PATHS.maximize} />}
+      {wcontext?.maximizable && (
+        <TitlebarControlButton label="maximize" svgPath={isMaximized ? SVG_PATHS.restore : SVG_PATHS.maximize} />
+      )}
       <TitlebarControlButton label="close" svgPath={SVG_PATHS.close} />
     </div>
   )
