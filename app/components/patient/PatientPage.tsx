@@ -5,9 +5,10 @@ interface PatientForm {
   name: string
   age: string
   sex: string
+  fatherOrHusband?: string
 }
 
-const initialState: PatientForm = { name: 'Sultan', age: '25', sex: 'Male' }
+const initialState: PatientForm = { name: 'Sultan', age: '25', sex: 'Male', fatherOrHusband: '' }
 
 interface TestGroup {
   id: string
@@ -103,7 +104,12 @@ export const PatientPage: React.FC = () => {
       .map((g) => {
         const chosen = Object.keys(g.selected).map((name) => {
           const meta = g.tests.find((t) => t.name === name) || {}
-          const result = g.selected[name].result.trim() ? g.selected[name].result : '-'
+          const result = g.selected[name].result.trim()
+            ? g.selected[name].result.toLowerCase() === 'negative' ||
+              g.selected[name].result.toLowerCase() === 'positive'
+              ? g.selected[name].result.toUpperCase()
+              : g.selected[name].result
+            : '-'
           return {
             name,
             result,
@@ -132,10 +138,16 @@ export const PatientPage: React.FC = () => {
       .then(async (res: any) => {
         console.warn('[Report Saved] id=', res?.id)
         try {
-          const pdfRes = await window.conveyor.app.generateReportPdf(report)
-          console.warn('[Report PDF] file=', pdfRes?.filePath)
+          // Generate (save) PDF in background while also opening preview window for immediate printing
+          window.conveyor.app
+            .generateReportPdf(report)
+            .catch((e: any) => console.error('Background PDF generation failed', e))
+          const printRes = await window.conveyor.app.printReport(report)
+          if (!printRes?.printed) {
+            console.error('Print failed', printRes?.error)
+          }
         } catch (e) {
-          console.error('Failed to generate PDF', e)
+          console.error('Failed to print report', e)
         }
       })
       .catch((err: any) => console.error('Failed to save test record', err))
@@ -178,6 +190,18 @@ export const PatientPage: React.FC = () => {
                 <span>Female</span>
               </label>
             </div>
+          </div>
+          <div className="form-field">
+            <label htmlFor="fatherOrHusband">Father/Husband</label>
+            <input
+              id="fatherOrHusband"
+              name="fatherOrHusband"
+              type="text"
+              value={form.fatherOrHusband || ''}
+              onChange={handleChange}
+              placeholder="Enter Father/Husband name"
+              autoComplete="off"
+            />
           </div>
         </div>
         <div className="divider" role="separator" />
@@ -289,7 +313,7 @@ export const PatientPage: React.FC = () => {
 
             <div style={{ marginTop: 16, paddingBottom: 16 }}>
               <button type="button" className="add-test-group-btn" onClick={addGroup} aria-label="Add Test Group">
-                + Add Another Test Category
+                + Add Test
               </button>
             </div>
           </div>

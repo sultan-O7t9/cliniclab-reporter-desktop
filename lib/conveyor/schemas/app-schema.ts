@@ -29,6 +29,7 @@ export const appIpcSchema = {
           name: z.string().optional().default(''),
           age: z.string().or(z.number()).optional().nullable(),
           sex: z.string().optional().default(''),
+          fatherOrHusband: z.string().optional().nullable(),
         }),
         tests: z.array(
           z.object({
@@ -55,5 +56,21 @@ export const appIpcSchema = {
       }),
     ]),
     return: z.object({ filePath: z.string() }),
+  },
+  'open-report-preview': {
+    args: z.tuple([
+      z.object({
+        report: z.any(),
+      }),
+    ]),
+    return: z.object({ opened: z.boolean() }),
+  },
+  'print-report': {
+    args: z.tuple([
+      z.object({
+        report: z.any(),
+      }),
+    ]),
+    return: z.object({ printed: z.boolean(), error: z.string().optional() }),
   },
 }

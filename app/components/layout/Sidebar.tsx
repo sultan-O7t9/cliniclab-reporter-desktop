@@ -1,5 +1,5 @@
 import React from 'react'
-import { User } from 'lucide-react'
+import { ClipboardPlus } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 export interface SidebarProps {
@@ -8,7 +8,7 @@ export interface SidebarProps {
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({ active, onSelect }) => {
-  const items = [{ key: 'patients', label: 'Patients', icon: User }]
+  const items = [{ key: 'patients', label: 'Generate Report', icon: ClipboardPlus }]
 
   return (
     <nav className="era-sidebar" aria-label="Sidebar">
