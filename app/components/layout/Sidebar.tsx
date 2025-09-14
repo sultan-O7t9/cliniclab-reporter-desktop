@@ -9,9 +9,10 @@ export interface SidebarProps {
 
 export const Sidebar: React.FC<SidebarProps> = ({ active, onSelect }) => {
   const items = [
-    { key: 'patients', label: 'Generate Report', icon: ClipboardPlus },
+    { key: 'patients', label: 'Generate Report', icon: ClipboardPlus }, // keep label as requested
     { key: 'records', label: 'Records', icon: ClipboardPlus },
     { key: 'tests', label: 'Tests', icon: ClipboardPlus },
+    { key: 'logs', label: 'Logs', icon: ClipboardPlus },
   ]
 
   return (

@@ -4,6 +4,7 @@ import Sidebar from '@/app/components/layout/Sidebar'
 import PatientPage from '@/app/components/patient/PatientPage'
 import RecordsPage from '@/app/components/records/RecordsPage'
 import TestsPage from '@/app/components/tests/TestsPage'
+import LogsPage from '@/app/components/logs/LogsPage'
 
 export default function App() {
   const [active, setActive] = useState('patients')
@@ -14,6 +15,8 @@ export default function App() {
         return <RecordsPage />
       case 'tests':
         return <TestsPage />
+      case 'logs':
+        return <LogsPage />
       case 'patients':
       default:
         return <PatientPage />

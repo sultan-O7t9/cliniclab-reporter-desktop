@@ -38,4 +38,26 @@ export class AppApi extends ConveyorApi {
       required?: boolean
     }[]
   ) => this.invoke('import-tests', tests)
+  exportLogs = (format: 'json' | 'txt' = 'json') =>
+    this.invoke('export-logs', { format }) as Promise<{ filePath: string; count: number }>
+  listLogs = (
+    options: {
+      offset?: number
+      limit?: number
+      level?: string | null
+      action?: string | null
+      search?: string | null
+    } = {}
+  ) =>
+    this.invoke('list-logs', {
+      offset: options.offset ?? 0,
+      limit: options.limit ?? 50,
+      level: options.level ?? null,
+      action: options.action ?? null,
+      search: options.search ?? null,
+    }) as Promise<{
+      total: number
+      rows: { id: number; ts: string; action: string; level: string; message?: string | null; payload?: any }[]
+    }>
+  resetDatabase = () => this.invoke('reset-database') as Promise<{ reset: boolean }>
 }

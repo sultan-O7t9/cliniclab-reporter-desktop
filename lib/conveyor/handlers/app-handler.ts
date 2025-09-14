@@ -1,7 +1,10 @@
 import { type App, BrowserWindow } from 'electron'
 import { handle } from '@/lib/main/shared'
-import { getDb } from '@/lib/main/database'
+import { getDb, logEvent, resetDatabase } from '@/lib/main/database'
 import { reseedTests, DEFAULT_TESTS } from '@/lib/main/database'
+import fs from 'fs'
+import path from 'path'
+import QRCode from 'qrcode'
 
 const escapeHtml = (v: any) =>
   (v == null ? '' : String(v))
@@ -12,7 +15,37 @@ const escapeHtml = (v: any) =>
     .replace(/'/g, '&#39;')
 
 export const registerAppHandlers = (app: App) => {
-  const buildReportHtml = (report: any) => {
+  const resolveResourcesDir = () => {
+    return app.isPackaged ? path.join(process.resourcesPath, 'resources') : path.join(app.getAppPath(), 'resources')
+  }
+
+  const getLogoDataUri = () => {
+    try {
+      const possible = [
+        path.join(resolveResourcesDir(), 'icons', 'clinic-logo.png'),
+        path.join(resolveResourcesDir(), 'icons', 'icon.png'),
+      ]
+      const file = possible.find((p) => fs.existsSync(p))
+      if (!file) return ''
+      const data = fs.readFileSync(file)
+      return 'data:image/png;base64,' + data.toString('base64')
+    } catch {
+      return ''
+    }
+  }
+
+  const buildQrForPhone = async (phoneRaw: string) => {
+    const digits = phoneRaw.replace(/[^0-9+]/g, '')
+    if (!digits) return ''
+    try {
+      // Use tel: URI so scanner-capable devices open dialer
+      return await QRCode.toDataURL(`tel:${digits}`, { margin: 0, width: 128 })
+    } catch {
+      return ''
+    }
+  }
+
+  const buildReportHtml = async (report: any) => {
     const patientName = (report?.patient?.name || '').toString().toUpperCase()
     const patientAge = report?.patient?.age || ''
     const patientSex = report?.patient?.sex || ''
@@ -159,6 +192,9 @@ export const registerAppHandlers = (app: App) => {
         return entry.html + suffix
       })
       .join('')
+    const PHONE_DISPLAY = '0349 4695920'
+    const qrDataUri = await buildQrForPhone(PHONE_DISPLAY)
+    const logoDataUri = getLogoDataUri()
     const html = `<!DOCTYPE html>
 <html>
 <head>
@@ -167,7 +203,10 @@ export const registerAppHandlers = (app: App) => {
   <style>
   * {color:#17365d;}
   body { margin:24px; font-family:Arial,Helvetica,sans-serif; }
-  .clinic-header { text-align:center; margin-bottom:24px; }
+  .clinic-header { text-align:center; margin-bottom:24px; position:relative; }
+  .clinic-header .logo { position:absolute; left:0; top:0; height:70px; }
+  .clinic-header .qr { position:absolute; right:128px; top:48px; height:48px; width:48px; object-fit:contain; }
+  .clinic-header .phone-label { position:absolute; right:90px; top:4px; font-size:12px; font-family:Cambria,serif; font-weight:600; letter-spacing:0.5px; }
   .clinic-header .title {text-decoration:underline; font-size:36px;color:#17365d;font-family:Cambria,serif; font-weight:700; letter-spacing:1px; }
   .clinic-header .subtitle1 {color:#17365d; font-size:10px; margin-top:4px; font-family:Arial,sans-serif;}
   .clinic-header .subtitle2, .clinic-header .subtitle3 { font-size:10px; font-family:Arial,sans-serif; line-height:1.2; margin-top:2px; color:#17365d; }
@@ -215,10 +254,13 @@ export const registerAppHandlers = (app: App) => {
 </head>
 <body>
   <div class="clinic-header">
+
+    ${qrDataUri ? `<img class="qr" src="${qrDataUri}" />` : ''}
     <div class="title">SHAMIM ARSHAD CLINIC</div>
+
     <b class="subtitle1">NOT VALID FOR ANY COURT</b>
     <div class="subtitle2">OPPOSITE FAUJI TOWER EID GAAH CHOWK <b>KUNJAH</b></div>
-    <div class="subtitle3">CELL NUMBER <b>--- 0349 4695920</b></div>
+    <div class="subtitle3">CELL NUMBER <b>--- ${PHONE_DISPLAY}</b></div>
   </div>
   <div class="patient-grid">
     <div class="cell"><span class="lbl">Patient Name</span></div>
@@ -245,14 +287,19 @@ export const registerAppHandlers = (app: App) => {
     return html
   }
   // App operations
-  handle('version', () => app.getVersion())
+  handle('version', () => {
+    logEvent({ action: 'VERSION_QUERY' })
+    return app.getVersion()
+  })
   handle('test-categories', () => {
     const db = getDb()
+    logEvent({ action: 'LIST_CATEGORIES' })
     const rows = db.prepare('SELECT DISTINCT category FROM test ORDER BY category').all() as { category: string }[]
     return rows.map((r) => r.category)
   })
   handle('tests-by-category', (category: string) => {
     const db = getDb()
+    logEvent({ action: 'TESTS_BY_CATEGORY', payload: { category } })
     const rows = db
       .prepare(
         'SELECT id, category, name, result, normal_value, required, sort_order, timestamp FROM test WHERE category = ? ORDER BY COALESCE(sort_order, 999999), id'
@@ -290,10 +337,16 @@ export const registerAppHandlers = (app: App) => {
       payload.patient?.fatherOrHusband || '',
       JSON.stringify(payload)
     )
-    return { id: Number(info.lastInsertRowid) }
+    const id = Number(info.lastInsertRowid)
+    logEvent({ action: 'SAVE_TEST_RECORD', payload: { id } })
+    return { id }
   })
-  handle('generate-report-pdf', () => ({ filePath: '', disabled: true }))
+  handle('generate-report-pdf', () => {
+    logEvent({ action: 'GENERATE_PDF' })
+    return { filePath: '', disabled: true }
+  })
   handle('open-report-preview', ({ report }: { report: any }) => {
+    logEvent({ action: 'OPEN_REPORT_PREVIEW' })
     const promise = (async () => {
       const win = new BrowserWindow({
         show: true,
@@ -301,7 +354,7 @@ export const registerAppHandlers = (app: App) => {
         height: 1000,
         webPreferences: { sandbox: false },
       })
-      const html = buildReportHtml(report)
+      const html = await buildReportHtml(report)
       await win.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(html))
       // Return immediately; user can print via auto or Ctrl+P
       return { opened: true }
@@ -309,12 +362,13 @@ export const registerAppHandlers = (app: App) => {
     return promise as any
   })
   handle('print-report', ({ report }: { report: any }) => {
+    logEvent({ action: 'PRINT_REPORT_ATTEMPT' })
     const promise = (async () => {
       const win = new BrowserWindow({
         show: false,
         webPreferences: { sandbox: false },
       })
-      const html = buildReportHtml(report)
+      const html = await buildReportHtml(report)
       await win.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(html))
       return await new Promise<{ printed: boolean; error?: string }>((resolve) => {
         win.webContents.print(
@@ -327,9 +381,13 @@ export const registerAppHandlers = (app: App) => {
             try {
               win.destroy()
             } catch {
-              /* ignore destroy errors */
+              /* ignore */
             }
-            if (!success) return resolve({ printed: false, error: failureReason || 'Unknown print failure' })
+            if (!success) {
+              logEvent({ action: 'PRINT_REPORT_FAIL', level: 'ERROR', message: failureReason || 'Unknown' })
+              return resolve({ printed: false, error: failureReason || 'Unknown print failure' })
+            }
+            logEvent({ action: 'PRINT_REPORT_SUCCESS' })
             resolve({ printed: true })
           }
         )
@@ -337,9 +395,8 @@ export const registerAppHandlers = (app: App) => {
     })()
     return promise as any
   })
-
-  // New handlers
   handle('recent-test-records', ({ limit }: { limit: number }) => {
+    logEvent({ action: 'RECENT_TEST_RECORDS', payload: { limit } })
     const db = getDb()
     const stmt = db.prepare(
       `SELECT id, patient_name, patient_age, patient_sex, patient_father_or_husband, created_at, payload
@@ -374,6 +431,7 @@ export const registerAppHandlers = (app: App) => {
     })
   })
   handle('search-test-records', ({ query, limit }: { query: string; limit: number }) => {
+    logEvent({ action: 'SEARCH_TEST_RECORDS', payload: { q: query, limit } })
     const db = getDb()
     const trimmed = (query || '').trim()
     if (!trimmed) return []
@@ -425,6 +483,7 @@ export const registerAppHandlers = (app: App) => {
     })
   })
   handle('get-test-record', (id: number) => {
+    logEvent({ action: 'GET_TEST_RECORD', payload: { id } })
     const db = getDb()
     const row = db
       .prepare(
@@ -449,6 +508,7 @@ export const registerAppHandlers = (app: App) => {
     }
   })
   handle('all-tests-grouped', () => {
+    logEvent({ action: 'ALL_TESTS_GROUPED' })
     const db = getDb()
     const rows = db
       .prepare(
@@ -471,6 +531,7 @@ export const registerAppHandlers = (app: App) => {
     return Object.keys(grouped).map((cat) => ({ category: cat, tests: grouped[cat] }))
   })
   handle('add-test-category', ({ category }: { category: string }) => {
+    logEvent({ action: 'ADD_TEST_CATEGORY', payload: { category } })
     const db = getDb()
     // Insert a dummy row if category doesn't exist (categories derive from test rows). We'll create a placeholder test name and then allow user to add real tests
     // Instead of dummy, we can simply ensure no-op by checking existence.
@@ -485,6 +546,7 @@ export const registerAppHandlers = (app: App) => {
   handle(
     'add-test',
     ({ category, name, normal_value }: { category: string; name: string; normal_value?: string | null }) => {
+      logEvent({ action: 'ADD_TEST', payload: { category, name } })
       const db = getDb()
       const stmt = db.prepare(
         'INSERT OR IGNORE INTO test (category, name, result, normal_value, required) VALUES (?, ?, ?, ?, 0)'
@@ -498,18 +560,21 @@ export const registerAppHandlers = (app: App) => {
     }
   )
   handle('update-test-normal', ({ id, normal_value }: { id: number; normal_value?: string | null }) => {
+    logEvent({ action: 'UPDATE_TEST_NORMAL', payload: { id } })
     const db = getDb()
     const stmt = db.prepare('UPDATE test SET normal_value = ? WHERE id = ?')
     const info = stmt.run(normal_value || '', id)
     return { updated: info.changes === 1 }
   })
   handle('update-test-required', ({ id, required }: { id: number; required: boolean }) => {
+    logEvent({ action: 'UPDATE_TEST_REQUIRED', payload: { id, required } })
     const db = getDb()
     const stmt = db.prepare('UPDATE test SET required = ? WHERE id = ?')
     const info = stmt.run(required ? 1 : 0, id)
     return { updated: info.changes === 1, required }
   })
   handle('maintenance-reseed-tests', () => {
+    logEvent({ action: 'MAINTENANCE_RESEED' })
     const db = getDb()
     // Hard reset: clear table then reseed defaults
     const totalBefore = db.prepare('SELECT COUNT(1) as c FROM test').get() as any
@@ -518,6 +583,7 @@ export const registerAppHandlers = (app: App) => {
     return { inserted, skipped, reset: true, previous: totalBefore?.c || 0 }
   })
   handle('export-tests', () => {
+    logEvent({ action: 'EXPORT_TESTS' })
     const db = getDb()
     const rows = db
       .prepare(
@@ -534,46 +600,131 @@ export const registerAppHandlers = (app: App) => {
       sort_order: typeof r.sort_order === 'number' ? r.sort_order : undefined,
     }))
   })
-  handle(
-    'import-tests',
-    (
-      payload: {
-        id?: number
-        category: string
-        name: string
-        normal_value?: string | null
-        result?: string | null
-        required?: boolean | number | null
-      }[]
-    ) => {
-      const db = getDb()
-      const insertWithId = db.prepare(
-        'INSERT OR IGNORE INTO test (id, category, name, result, normal_value, required, sort_order) VALUES (@id, @category, @name, @result, @normal_value, @required, @sort_order)'
-      )
-      const insertNoId = db.prepare(
-        'INSERT OR IGNORE INTO test (category, name, result, normal_value, required, sort_order) VALUES (@category, @name, @result, @normal_value, @required, @sort_order)'
-      )
-      let inserted = 0
-      for (const raw of payload) {
-        const base = {
-          category: raw.category?.trim() || '',
-          name: raw.name?.trim() || '',
-          result: (raw.result || '').toString().trim(),
-          normal_value: (raw.normal_value || '').toString().trim(),
-          required: raw.required ? 1 : 0,
-          sort_order: typeof (raw as any).sort_order === 'number' ? (raw as any).sort_order : null,
-        }
-        if (!base.category || !base.name) continue
-        let info: any
-        if (raw.id && Number.isFinite(raw.id) && raw.id > 0) {
-          info = insertWithId.run({ id: raw.id, ...base })
-          // If id already existed (ignored) but (category,name) not present, we may want to attempt without id; skip for simplicity.
-        } else {
-          info = insertNoId.run(base)
-        }
-        if (info?.changes === 1) inserted++
+  handle('import-tests', (payload: any[]) => {
+    logEvent({ action: 'IMPORT_TESTS', payload: { count: payload.length } })
+    const db = getDb()
+    const insertWithId = db.prepare(
+      'INSERT OR IGNORE INTO test (id, category, name, result, normal_value, required, sort_order) VALUES (@id, @category, @name, @result, @normal_value, @required, @sort_order)'
+    )
+    const insertNoId = db.prepare(
+      'INSERT OR IGNORE INTO test (category, name, result, normal_value, required, sort_order) VALUES (@category, @name, @result, @normal_value, @required, @sort_order)'
+    )
+    let inserted = 0
+    for (const raw of payload) {
+      const base = {
+        category: raw.category?.trim() || '',
+        name: raw.name?.trim() || '',
+        result: (raw.result || '').toString().trim(),
+        normal_value: (raw.normal_value || '').toString().trim(),
+        required: raw.required ? 1 : 0,
+        sort_order: typeof (raw as any).sort_order === 'number' ? (raw as any).sort_order : null,
       }
-      return { inserted, skipped: payload.length - inserted }
+      if (!base.category || !base.name) continue
+      let info: any
+      if (raw.id && Number.isFinite(raw.id) && raw.id > 0) {
+        info = insertWithId.run({ id: raw.id, ...base })
+        // If id already existed (ignored) but (category,name) not present, we may want to attempt without id; skip for simplicity.
+      } else {
+        info = insertNoId.run(base)
+      }
+      if (info?.changes === 1) inserted++
+    }
+    return { inserted, skipped: payload.length - inserted }
+  })
+  handle('export-logs', ({ format }: { format: 'json' | 'txt' }) => {
+    const db = getDb()
+    const rows = db.prepare('SELECT ts, action, level, payload, message FROM app_logs ORDER BY id ASC').all() as any[]
+    let content = ''
+    if (format === 'json') {
+      content = rows
+        .map((r) => ({
+          ts: r.ts,
+          action: r.action,
+          level: r.level,
+          payload: r.payload ? JSON.parse(r.payload) : null,
+          message: r.message || '',
+        }))
+        .map((o) => JSON.stringify(o))
+        .join('\n')
+    } else {
+      content = rows.map((r) => `${r.ts} [${r.level}] ${r.action} ${r.message || ''} ${r.payload || ''}`).join('\n')
+    }
+    const fileName = `logs-${Date.now()}.${format === 'json' ? 'jsonl' : 'txt'}`
+    const dir = app.getPath('documents')
+    const outPath = path.join(dir, fileName)
+    fs.writeFileSync(outPath, content, 'utf-8')
+    logEvent({ action: 'EXPORT_LOGS', payload: { format, count: rows.length } })
+    return { filePath: outPath, count: rows.length }
+  })
+  handle(
+    'list-logs',
+    ({
+      offset,
+      limit,
+      level,
+      action,
+      search,
+    }: {
+      offset: number
+      limit: number
+      level?: string | null
+      action?: string | null
+      search?: string | null
+    }) => {
+      const db = getDb()
+      const clauses: string[] = []
+      const params: any[] = []
+      if (level) {
+        clauses.push('level = ?')
+        params.push(level.toUpperCase())
+      }
+      if (action) {
+        clauses.push('action = ?')
+        params.push(action.toUpperCase())
+      }
+      if (search && search.trim()) {
+        clauses.push('(action LIKE ? OR message LIKE ? OR payload LIKE ?)')
+        const like = `%${search.trim()}%`
+        params.push(like, like, like)
+      }
+      const where = clauses.length ? 'WHERE ' + clauses.join(' AND ') : ''
+      const totalRow = db.prepare(`SELECT COUNT(1) as c FROM app_logs ${where}`).get(...params) as any
+      const rows = db
+        .prepare(
+          `SELECT id, ts, action, level, payload, message FROM app_logs ${where} ORDER BY id DESC LIMIT ? OFFSET ?`
+        )
+        .all(...params, limit, offset) as any[]
+      return {
+        total: totalRow?.c || 0,
+        rows: rows.map((r) => ({
+          id: r.id,
+          ts: r.ts,
+          action: r.action,
+          level: r.level,
+          message: r.message || '',
+          payload: r.payload
+            ? (() => {
+                try {
+                  return JSON.parse(r.payload)
+                } catch {
+                  return r.payload
+                }
+              })()
+            : null,
+        })),
+      }
     }
   )
+  // Reset database (archives old file, recreates schema, reseeds)
+  handle('reset-database', () => {
+    logEvent({ action: 'RESET_DB_REQUEST' })
+    try {
+      resetDatabase()
+      logEvent({ action: 'RESET_DB_SUCCESS' })
+      return { reset: true }
+    } catch (err) {
+      logEvent({ action: 'RESET_DB_FAILURE', level: 'ERROR', payload: { error: String(err) } })
+      return { reset: false }
+    }
+  })
 }

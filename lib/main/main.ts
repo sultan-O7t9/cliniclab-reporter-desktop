@@ -1,16 +1,19 @@
 import { app, BrowserWindow } from 'electron'
 import { electronApp, optimizer } from '@electron-toolkit/utils'
 import { createAppWindow } from './app'
-import { seedDatabase } from './database'
+import { seedDatabase, logEvent, pruneOldLogs } from './database'
 
 // This method will be called when Electron has finished
 // initialization and is ready to create browser windows.
 // Some APIs can only be used after this event occurs.
 app.whenReady().then(() => {
+  logEvent({ action: 'APP_START' })
+  pruneOldLogs(3)
   try {
     seedDatabase()
   } catch (err) {
     console.error('[DB] Seeding failed', err)
+    logEvent({ action: 'SEED_FAILED', level: 'ERROR', message: String(err) })
   }
 
   // Set app user model id for windows
@@ -30,8 +33,13 @@ app.whenReady().then(() => {
     // dock icon is clicked and there are no other windows open.
     if (BrowserWindow.getAllWindows().length === 0) {
       createAppWindow()
+      logEvent({ action: 'APP_ACTIVATE_RECREATE' })
     }
   })
+})
+
+app.on('before-quit', () => {
+  logEvent({ action: 'APP_CLOSE' })
 })
 
 // Quit when all windows are closed, except on macOS. There, it's common

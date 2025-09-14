@@ -1,4 +1,4 @@
-# Electron React App
+# ClinicLab Reporter
 
 <br />
 <p align="center">
@@ -342,6 +342,48 @@ const Button = () => (
 - **Electron main process** code
 - Handles window creation, app lifecycle, and system integration
 - Registers IPC handlers and manages app state
+
+#### Database & Data Storage
+
+The application persists data in a **SQLite database** using `better-sqlite3`.
+
+Storage strategy:
+
+- Databases are stored inside Electron's `userData` directory (OS-specific safe location)
+- Development and production are **physically separated** to prevent accidental data overlap
+  - Production filename: `cliniclab_reporter.db`
+  - Development filename: `cliniclab_reporter__dev.db`
+- On first run after upgrade, any legacy database located in the old Documents-based path is migrated automatically (the original file is left intact as a safety measure)
+- An environment variable override is supported: set `CLINICLAB_DB_PATH` to force a custom absolute path (useful for advanced deployments or diagnostics)
+
+Resetting the database:
+
+You can archive and recreate the database (fresh schema + default test seeds) via the new IPC channel:
+
+```ts
+await window.conveyor.app.resetDatabase()
+```
+
+What happens during reset:
+
+1. Current DB connection is closed.
+2. Existing file is copied to a timestamped `*-YYYY-MM-DD-hh-mm-ss.bak.db` archive.
+3. A brand new database file is created.
+4. Schema + default test definitions are re-seeded.
+5. A `DB_RESET_COMPLETE` log entry is recorded.
+
+This is useful for clearing test data during development or performing a clean state recovery. Logs are not purged by this action—only structured data tables.
+
+Search performance:
+
+- Patient name search uses FTS5 (full-text search) if available.
+- Falls back to a case-insensitive `LIKE` search when FTS5 isn't supported by the bundled SQLite build.
+
+Log retention & archival:
+
+- Application logs are stored in the same database (`app_logs` table).
+- A pruning routine removes entries older than the configured retention window (default 3 days) after archiving them to a timestamped file.
+
 
 #### `lib/preload/` - Preload Scripts
 

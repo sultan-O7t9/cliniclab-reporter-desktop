@@ -8,7 +8,7 @@ interface PatientForm {
   fatherOrHusband?: string
 }
 
-const initialState: PatientForm = { name: 'Sultan', age: '25', sex: 'Male', fatherOrHusband: '' }
+const initialState: PatientForm = { name: '', age: '', sex: 'Female', fatherOrHusband: '' }
 
 interface TestGroup {
   id: string
@@ -326,23 +326,11 @@ export const PatientPage: React.FC = () => {
                                   style={{ display: 'flex', alignItems: 'center', gap: 6 }}
                                 >
                                   <span>{t.name}</span>
-                                  {/* {t.required && (
-                                    <span
-                                      style={{
-                                        background: '#17365d',
-                                        color: '#fff',
-                                        padding: '0 6px',
-                                        fontSize: 10,
-                                        borderRadius: 3,
-                                        lineHeight: '16px',
-                                        fontFamily: 'Cambria,serif',
-                                      }}
-                                      aria-label="Required test auto-selected"
-                                      title="Required test auto-selected"
-                                    >
-                                      Req
-                                    </span>
-                                  )} */}
+                                  {/* Example re-enable:
+                                  {t.required && (
+                                    <span className="badge-required" aria-label="Required test auto-selected" title="Required test auto-selected">Req</span>
+                                  )}
+                                  */}
                                 </div>
                               </label>
                               {checked ? (
@@ -374,13 +362,8 @@ export const PatientPage: React.FC = () => {
                       <button
                         type="button"
                         onClick={() => toggleBreakAfter(g.id)}
-                        className="btn-win"
-                        style={{
-                          fontSize: 11,
-                          padding: '4px 10px',
-                          background: g.breakAfter ? '#0078d4' : undefined,
-                          color: g.breakAfter ? '#fff' : undefined,
-                        }}
+                        className="btn-win btn-toggle-break"
+                        style={{ fontSize: 11, padding: '4px 10px' }}
                         aria-pressed={g.breakAfter ? 'true' : 'false'}
                         aria-label={g.breakAfter ? 'Remove line break after group' : 'Add line break after group'}
                         title={
@@ -391,18 +374,7 @@ export const PatientPage: React.FC = () => {
                       </button>
                     </div>
                   ) : null}
-                  {g.breakAfter && (
-                    <div
-                      aria-hidden="true"
-                      style={{
-                        height: 12,
-                        marginTop: 8,
-                        marginBottom: 4,
-                        borderBottom: '1px dashed var(--border-color, #999)',
-                        opacity: 0.6,
-                      }}
-                    />
-                  )}
+                  {g.breakAfter && <div aria-hidden="true" className="group-break-separator" />}
                 </div>
               )
             })}

@@ -21,13 +21,13 @@ const EraContent = () => {
   return (
     <div>
       <h2 className="flex items-center gap-4">
-        Electron React App
+        ClinicLab Reporter
         <div className="p-1 rounded-md bg-primary/10">
           <img src="res://icons/era.svg" className="w-4 h-4" />
         </div>
       </h2>
       <p>
-        Welcome to the Electron React App (v{appVersion})! A prebuilt starter kit that provides a solid foundation for
+        Welcome to the ClinicLab Reporter (v{appVersion})! A prebuilt starter kit that provides a solid foundation for
         developing desktop applications.
       </p>
       <p>
@@ -62,7 +62,7 @@ const EraContent = () => {
       </div>
 
       <p className="learn-more">
-        Learn more about Electron React App at{' '}
+        Learn more about ClinicLab Reporter at{' '}
         <a href="https://github.com/guasam/electron-react-app" target="_blank" rel="noreferrer">
           github.com
         </a>

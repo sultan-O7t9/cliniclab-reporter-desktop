@@ -1,17 +1,137 @@
 import Database from 'better-sqlite3'
 import path from 'path'
+import fs from 'fs'
 import { app } from 'electron'
 
 let db: Database.Database | null = null
+let initializing = false
+
+// Central storage directory + file naming
+// Move from Documents to userData to avoid sharing across unrelated user edits and to follow Electron conventions.
+// Provide separate dev/prod file names to avoid contamination.
+const STORAGE_DIR_NAME = 'ClinicLab_Reporter_do_not_delete'
+const BASE_PATH = (() => {
+  // If env override set, honor it (absolute or relative to userData)
+  const override = process.env.CLINICLAB_DB_PATH
+  if (override) {
+    try {
+      const p = path.isAbsolute(override) ? override : path.join(app.getPath('userData'), override)
+      return p
+    } catch (e) {
+      console.warn('[DB] Invalid CLINICLAB_DB_PATH override, falling back to userData:', e)
+    }
+  }
+  return app.getPath('userData')
+})()
+const NEW_DB_FILENAME = app.isPackaged ? 'cliniclab_reporter.db' : 'cliniclab_reporter__dev.db'
+const LEGACY_DB_FILENAME = 'example.db'
+
+function ensureStorageDir(base: string, subFolder = STORAGE_DIR_NAME) {
+  const full = path.join(base, subFolder)
+  if (!fs.existsSync(full)) {
+    try {
+      fs.mkdirSync(full, { recursive: true })
+      if (db && !initializing) {
+        logEvent({ action: 'LOG_STORAGE_DIR_CREATED', payload: { path: full } })
+      } else {
+        console.warn('[STORAGE] Created storage directory', full)
+      }
+    } catch (err) {
+      console.error('[STORAGE] Failed to create storage directory', err)
+    }
+  }
+  return full
+}
+
+function migrateLegacyDatabase(legacyDocumentsPath: string, storageDir: string) {
+  // For users upgrading from earlier builds that stored DB in Documents
+  const legacyPath = path.join(legacyDocumentsPath, STORAGE_DIR_NAME, NEW_DB_FILENAME)
+  const legacyExample = path.join(legacyDocumentsPath, LEGACY_DB_FILENAME)
+  const newPath = path.join(storageDir, NEW_DB_FILENAME)
+  if (fs.existsSync(newPath)) {
+    // Already migrated
+    return newPath
+  }
+  if (fs.existsSync(legacyPath)) {
+    try {
+      if (db && !initializing)
+        logEvent({ action: 'LOG_STORAGE_MIGRATE_START', payload: { from: legacyPath, to: newPath } })
+      fs.copyFileSync(legacyPath, newPath)
+      // Keep legacy copy as a safety fallback, but could be removed/commented if deletion desired
+      if (db && !initializing) logEvent({ action: 'LOG_STORAGE_MIGRATE_COMPLETE', payload: { newPath } })
+      return newPath
+    } catch (err) {
+      if (db && !initializing)
+        logEvent({ action: 'LOG_STORAGE_MIGRATE_FAILED', level: 'ERROR', payload: { error: String(err) } })
+      console.error('[STORAGE] Migration failed', err)
+    }
+  } else if (fs.existsSync(legacyExample)) {
+    try {
+      if (db && !initializing)
+        logEvent({ action: 'LOG_STORAGE_LEGACY_EXAMPLE_START', payload: { from: legacyExample, to: newPath } })
+      fs.copyFileSync(legacyExample, newPath)
+      if (db && !initializing) logEvent({ action: 'LOG_STORAGE_LEGACY_EXAMPLE_COMPLETE', payload: { newPath } })
+      return newPath
+    } catch (err) {
+      console.error('[STORAGE] Legacy example migration failed', err)
+      if (db && !initializing)
+        logEvent({ action: 'LOG_STORAGE_LEGACY_EXAMPLE_FAILED', level: 'ERROR', payload: { error: String(err) } })
+    }
+  } else {
+    if (db && !initializing) logEvent({ action: 'LOG_STORAGE_MIGRATE_SKIP', payload: { reason: 'no_legacy_db' } })
+  }
+  return newPath
+}
 
 export function getDb() {
   if (!db) {
-    const documentsPath = app.getPath('documents')
-    const dbPath = path.join(documentsPath, 'example.db')
-    db = new Database(dbPath)
+    initializing = true
+    const legacyDocuments = app.getPath('documents')
+    const storageDir = ensureStorageDir(BASE_PATH)
+    const targetPath = migrateLegacyDatabase(legacyDocuments, storageDir)
+    db = new Database(targetPath)
     db.pragma('journal_mode = WAL')
+    initializing = false
   }
   return db
+}
+
+// Structured logging helper
+export type LogLevel = 'INFO' | 'WARN' | 'ERROR'
+export interface LogEntryInput {
+  action: string
+  level?: LogLevel
+  payload?: any
+  message?: string
+}
+export function logEvent(entry: LogEntryInput) {
+  try {
+    const database = getDb()
+    database.exec(`CREATE TABLE IF NOT EXISTS app_logs(
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      ts TEXT NOT NULL,
+      action TEXT NOT NULL,
+      level TEXT NOT NULL,
+      payload TEXT,
+      message TEXT
+    )`)
+    // Indexes for querying by action/time
+    database.exec('CREATE INDEX IF NOT EXISTS idx_app_logs_action ON app_logs(action)')
+    database.exec('CREATE INDEX IF NOT EXISTS idx_app_logs_ts ON app_logs(ts)')
+    const now = new Date()
+    const ts = `${String(now.getDate()).padStart(2, '0')}/${String(now.getMonth() + 1).padStart(2, '0')}/${now.getFullYear()}-${String(now.getHours()).padStart(2, '0')}-${String(now.getMinutes()).padStart(2, '0')}`
+    const stmt = database.prepare('INSERT INTO app_logs (ts, action, level, payload, message) VALUES (?, ?, ?, ?, ?)')
+    stmt.run(
+      ts,
+      entry.action.toUpperCase(),
+      entry.level || 'INFO',
+      entry.payload != null ? JSON.stringify(entry.payload) : null,
+      entry.message || ''
+    )
+  } catch (err) {
+    // Last resort: console fallback
+    console.error('[LOGGING] Failed to persist log', err)
+  }
 }
 
 /**
@@ -466,6 +586,7 @@ export function reseedTests(custom?: typeof DEFAULT_TESTS) {
 
 export function seedDatabase() {
   const database = getDb()
+  logEvent({ action: 'SEED_START', payload: {} })
   database.exec(
     `CREATE TABLE IF NOT EXISTS schema_meta (key TEXT PRIMARY KEY, value TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP)`
   )
@@ -570,4 +691,97 @@ export function seedDatabase() {
     database.prepare('INSERT OR IGNORE INTO schema_meta (key, value) VALUES (?, ?)').run('initial_tests', '1')
   }
   console.warn(`[DB] Default tests ensured (inserted ${inserted}, skipped ${skipped}).`)
+  logEvent({ action: 'SEED_COMPLETE', payload: { inserted, skipped } })
+}
+
+/** Archive + reset the current database (creates a fresh schema + applies default seeds). */
+export function resetDatabase() {
+  if (db) {
+    try {
+      db.close()
+    } catch (e) {
+      console.error('[DB] Failed closing DB during reset', e)
+    }
+    db = null
+  }
+  const legacyDocuments = app.getPath('documents')
+  const storageDir = ensureStorageDir(BASE_PATH)
+  const targetPath = migrateLegacyDatabase(legacyDocuments, storageDir)
+  // Archive existing file if present
+  if (fs.existsSync(targetPath)) {
+    const stamp = new Date().toISOString().replace(/[:T]/g, '-').replace(/\..+/, '')
+    const archivePath = targetPath.replace(/\.db$/, `-${stamp}.bak.db`)
+    try {
+      fs.copyFileSync(targetPath, archivePath)
+      fs.unlinkSync(targetPath)
+      console.warn('[DB] Archived old DB to', archivePath)
+      logEvent({ action: 'DB_ARCHIVED', payload: { archivePath } })
+    } catch (err) {
+      console.error('[DB] Failed to archive DB', err)
+      logEvent({ action: 'DB_ARCHIVE_FAILED', level: 'ERROR', payload: { error: String(err) } })
+    }
+  }
+  db = new Database(targetPath)
+  db.pragma('journal_mode = WAL')
+  seedDatabase()
+  logEvent({ action: 'DB_RESET_COMPLETE' })
+}
+
+export function pruneOldLogs(days = 3) {
+  try {
+    const database = getDb()
+    database.exec(`CREATE TABLE IF NOT EXISTS app_logs(
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      ts TEXT NOT NULL,
+      action TEXT NOT NULL,
+      level TEXT NOT NULL,
+      payload TEXT,
+      message TEXT
+    )`)
+    const cutoff = Date.now() - days * 24 * 60 * 60 * 1000
+    const rows = database.prepare('SELECT id, ts, action, level, payload, message FROM app_logs').all() as {
+      id: number
+      ts: string
+      action: string
+      level: string
+      payload: string | null
+      message: string | null
+    }[]
+    const parseTs = (ts: string) => {
+      // Format: DD/MM/YYYY-hh-mm
+      const m = ts.match(/^(\d{2})\/(\d{2})\/(\d{4})-(\d{2})-(\d{2})$/)
+      if (!m) return null
+      const [_, dd, MM, yyyy, hh, mm] = m
+      return new Date(Number(yyyy), Number(MM) - 1, Number(dd), Number(hh), Number(mm)).getTime()
+    }
+    const stale: typeof rows = []
+    for (const r of rows) {
+      const t = parseTs(r.ts)
+      if (t != null && t < cutoff) stale.push(r)
+    }
+    if (stale.length) {
+      // Archive first
+      try {
+        const documentsPath = app.getPath('documents')
+        const storageDir = path.join(documentsPath, STORAGE_DIR_NAME)
+        if (!fs.existsSync(storageDir)) fs.mkdirSync(storageDir, { recursive: true })
+        const stamp = new Date().toISOString().replace(/[:T]/g, '-').replace(/\..+/, '')
+        const archivePath = path.join(storageDir, `purged-logs-${stamp}.txt`)
+        const lines = stale.map((s) => {
+          return `[${s.ts}] ${s.level} ${s.action} ${s.message || ''} ${s.payload ? s.payload : ''}`.trim()
+        })
+        fs.writeFileSync(archivePath, lines.join('\n'), 'utf-8')
+        logEvent({ action: 'LOG_RETENTION_ARCHIVE', payload: { file: archivePath, count: stale.length } })
+      } catch (archiveErr) {
+        console.error('[LOGGING] Failed to archive stale logs', archiveErr)
+        logEvent({ action: 'LOG_RETENTION_ARCHIVE_FAILED', level: 'ERROR', payload: { error: String(archiveErr) } })
+      }
+      // Delete stale
+      const del = database.prepare('DELETE FROM app_logs WHERE id = ?')
+      for (let i = 0; i < stale.length; i++) del.run(stale[i].id)
+      logEvent({ action: 'LOG_RETENTION_PURGE', payload: { removed: stale.length, days } })
+    }
+  } catch (err) {
+    console.error('[LOGGING] pruneOldLogs failed', err)
+  }
 }

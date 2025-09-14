@@ -207,4 +207,41 @@ export const appIpcSchema = {
       })
     ),
   },
+  // New: export logs
+  'export-logs': {
+    args: z.tuple([z.object({ format: z.enum(['json', 'txt']).default('json') })]),
+    return: z.object({ filePath: z.string(), count: z.number() }),
+  },
+  // New: list logs with pagination + optional filters
+  'list-logs': {
+    args: z.tuple([
+      z
+        .object({
+          offset: z.number().min(0).default(0),
+          limit: z.number().min(1).max(500).default(50),
+          level: z.string().optional().nullable(),
+          action: z.string().optional().nullable(),
+          search: z.string().optional().nullable(),
+        })
+        .default({ offset: 0, limit: 50 }),
+    ]),
+    return: z.object({
+      total: z.number(),
+      rows: z.array(
+        z.object({
+          id: z.number(),
+          ts: z.string(),
+          action: z.string(),
+          level: z.string(),
+          message: z.string().nullable().optional(),
+          payload: z.any().nullable().optional(),
+        })
+      ),
+    }),
+  },
+  // Reset database: archives existing file, recreates schema, re-seeds defaults
+  'reset-database': {
+    args: z.tuple([]),
+    return: z.object({ reset: z.boolean() }),
+  },
 }

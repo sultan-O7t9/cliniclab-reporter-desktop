@@ -209,6 +209,40 @@ export const TestsPage: React.FC = () => {
             >
               Import
             </button>
+            <button
+              type="button"
+              className="btn-win"
+              disabled={saving}
+              onClick={async () => {
+                try {
+                  const res = await window.conveyor.app.exportLogs('json')
+                  setReseedStatus(`Logs exported (${res.count}) to ${res.filePath}`)
+                } catch (e) {
+                  console.error('Log export failed', e)
+                  setReseedStatus('Log export failed')
+                }
+              }}
+              aria-label="Export logs JSON"
+            >
+              Logs JSON
+            </button>
+            <button
+              type="button"
+              className="btn-win"
+              disabled={saving}
+              onClick={async () => {
+                try {
+                  const res = await window.conveyor.app.exportLogs('txt')
+                  setReseedStatus(`Logs exported (${res.count}) to ${res.filePath}`)
+                } catch (e) {
+                  console.error('Log export failed', e)
+                  setReseedStatus('Log export failed')
+                }
+              }}
+              aria-label="Export logs TXT"
+            >
+              Logs TXT
+            </button>
             <input
               ref={fileInputRef}
               type="file"
