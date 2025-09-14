@@ -8,7 +8,11 @@ export interface SidebarProps {
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({ active, onSelect }) => {
-  const items = [{ key: 'patients', label: 'Generate Report', icon: ClipboardPlus }]
+  const items = [
+    { key: 'patients', label: 'Generate Report', icon: ClipboardPlus },
+    { key: 'records', label: 'Records', icon: ClipboardPlus },
+    { key: 'tests', label: 'Tests', icon: ClipboardPlus },
+  ]
 
   return (
     <nav className="era-sidebar" aria-label="Sidebar">

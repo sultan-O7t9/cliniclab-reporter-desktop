@@ -16,13 +16,14 @@ interface TestGroup {
   tests: any[]
   selected: Record<string, { result: string }>
   loading: boolean
+  breakAfter?: boolean
 }
 
 export const PatientPage: React.FC = () => {
   const [form, setForm] = useState<PatientForm>(initialState)
   const [categories, setCategories] = useState<string[]>([])
   const [groups, setGroups] = useState<TestGroup[]>([
-    { id: 'g-1', category: '', tests: [], selected: {}, loading: false },
+    { id: 'g-1', category: '', tests: [], selected: {}, loading: false, breakAfter: false },
   ])
 
   useEffect(() => {
@@ -58,7 +59,23 @@ export const PatientPage: React.FC = () => {
       .testsByCategory(category)
       .then((rows) => {
         if (!mounted) return
-        setGroups((gs) => gs.map((g) => (g.id === groupId ? { ...g, tests: rows, loading: false } : g)))
+        // Auto-select required tests
+        const requiredNames = rows.filter((r: any) => r.required).map((r: any) => r.name)
+        setGroups((gs) =>
+          gs.map((g) =>
+            g.id === groupId
+              ? {
+                  ...g,
+                  tests: rows,
+                  loading: false,
+                  selected: requiredNames.reduce<Record<string, { result: string }>>((acc, name) => {
+                    acc[name] = { result: '' }
+                    return acc
+                  }, {}),
+                }
+              : g
+          )
+        )
       })
       .catch((e) => {
         console.error('Failed to load tests', e)
@@ -88,14 +105,35 @@ export const PatientPage: React.FC = () => {
   }
 
   const addGroup = () => {
-    setGroups((gs) => [...gs, { id: `g-${gs.length + 1}`, category: '', tests: [], selected: {}, loading: false }])
+    setGroups((gs) => {
+      if (gs.length) {
+        const last = gs[gs.length - 1]
+        const hasCategory = !!last.category
+        const hasAtLeastOneTest = Object.keys(last.selected).length > 0
+        if (!hasCategory || !hasAtLeastOneTest) {
+          console.warn(
+            '[AddGroup] Cannot add new group until previous group has category and at least one selected test.'
+          )
+          return gs
+        }
+      }
+      return [
+        ...gs,
+        { id: `g-${gs.length + 1}`, category: '', tests: [], selected: {}, loading: false, breakAfter: false },
+      ]
+    })
   }
 
   const removeGroup = (groupId: string) => {
     setGroups((gs) => {
-      if (gs.length === 1) return [{ id: 'g-1', category: '', tests: [], selected: {}, loading: false }]
+      if (gs.length === 1)
+        return [{ id: 'g-1', category: '', tests: [], selected: {}, loading: false, breakAfter: false }]
       return gs.filter((g) => g.id !== groupId)
     })
+  }
+
+  const toggleBreakAfter = (groupId: string) => {
+    setGroups((gs) => gs.map((g) => (g.id === groupId ? { ...g, breakAfter: !g.breakAfter } : g)))
   }
 
   const handlePrint = () => {
@@ -111,6 +149,7 @@ export const PatientPage: React.FC = () => {
               : g.selected[name].result
             : '-'
           return {
+            id: (meta as any).id,
             name,
             result,
             normal: (meta as any).normal_value || (meta as any).normal || '',
@@ -120,6 +159,7 @@ export const PatientPage: React.FC = () => {
         return {
           category: g.category,
           tests: [...chosen],
+          breakAfter: !!g.breakAfter,
         }
       })
       .filter((g) => g.tests.length)
@@ -138,10 +178,6 @@ export const PatientPage: React.FC = () => {
       .then(async (res: any) => {
         console.warn('[Report Saved] id=', res?.id)
         try {
-          // Generate (save) PDF in background while also opening preview window for immediate printing
-          window.conveyor.app
-            .generateReportPdf(report)
-            .catch((e: any) => console.error('Background PDF generation failed', e))
           const printRes = await window.conveyor.app.printReport(report)
           if (!printRes?.printed) {
             console.error('Print failed', printRes?.error)
@@ -191,6 +227,9 @@ export const PatientPage: React.FC = () => {
               </label>
             </div>
           </div>
+
+          {/* Row break to push following fields to next line without making them full width */}
+          <div style={{ gridColumn: '1 / -1', height: 0, padding: 0, margin: 0 }} aria-hidden="true" />
           <div className="form-field">
             <label htmlFor="fatherOrHusband">Father/Husband</label>
             <input
@@ -282,7 +321,29 @@ export const PatientPage: React.FC = () => {
                                   }}
                                   aria-label={`Select ${t.name}`}
                                 />
-                                <div className="test-row-name">{t.name}</div>
+                                <div
+                                  className="test-row-name"
+                                  style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+                                >
+                                  <span>{t.name}</span>
+                                  {/* {t.required && (
+                                    <span
+                                      style={{
+                                        background: '#17365d',
+                                        color: '#fff',
+                                        padding: '0 6px',
+                                        fontSize: 10,
+                                        borderRadius: 3,
+                                        lineHeight: '16px',
+                                        fontFamily: 'Cambria,serif',
+                                      }}
+                                      aria-label="Required test auto-selected"
+                                      title="Required test auto-selected"
+                                    >
+                                      Req
+                                    </span>
+                                  )} */}
+                                </div>
                               </label>
                               {checked ? (
                                 <input
@@ -307,6 +368,41 @@ export const PatientPage: React.FC = () => {
                     <div style={{ marginTop: 12, fontSize: 12, opacity: 0.7 }}>No tests found.</div>
                   )}
                   {g.loading && <div style={{ marginTop: 12, fontSize: 12, opacity: 0.7 }}>Loading tests...</div>}
+                  {/* Break toggle button (affects rendering order in PDF/print) */}
+                  {g.category && g.category.toLowerCase() !== 'urine report' ? (
+                    <div style={{ marginTop: 8, textAlign: 'center' }}>
+                      <button
+                        type="button"
+                        onClick={() => toggleBreakAfter(g.id)}
+                        className="btn-win"
+                        style={{
+                          fontSize: 11,
+                          padding: '4px 10px',
+                          background: g.breakAfter ? '#0078d4' : undefined,
+                          color: g.breakAfter ? '#fff' : undefined,
+                        }}
+                        aria-pressed={g.breakAfter ? 'true' : 'false'}
+                        aria-label={g.breakAfter ? 'Remove line break after group' : 'Add line break after group'}
+                        title={
+                          g.breakAfter ? 'Line break enabled (click to disable)' : 'Add a line break after this group'
+                        }
+                      >
+                        {g.breakAfter ? 'Break Added ✓' : 'Add Line Break'}
+                      </button>
+                    </div>
+                  ) : null}
+                  {g.breakAfter && (
+                    <div
+                      aria-hidden="true"
+                      style={{
+                        height: 12,
+                        marginTop: 8,
+                        marginBottom: 4,
+                        borderBottom: '1px dashed var(--border-color, #999)',
+                        opacity: 0.6,
+                      }}
+                    />
+                  )}
                 </div>
               )
             })}

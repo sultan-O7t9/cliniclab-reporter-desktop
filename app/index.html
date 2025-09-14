@@ -3,9 +3,10 @@
   <head>
     <meta charset="UTF-8" />
     <title>Electron</title>
+    <!-- CSP relaxed for development to allow Vite's HMR (blob workers + websocket). In production you may want to tighten this. -->
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: res:;"
+      content="default-src 'self'; script-src 'self' blob: 'unsafe-inline' 'unsafe-eval'; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: res:; connect-src 'self' ws://localhost:* ws://127.0.0.1:*;"
     />
   </head>
 
