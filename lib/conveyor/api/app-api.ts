@@ -9,6 +9,8 @@ export class AppApi extends ConveyorApi {
   openReportPreview = (report: any) => this.invoke('open-report-preview', { report })
   printReport = (report: any) => this.invoke('print-report', { report })
   recentTestRecords = (limit = 50) => this.invoke('recent-test-records', { limit })
+  searchTestRecords = (query: string, limit = 50) => this.invoke('search-test-records', { query, limit })
+  getTestRecord = (id: number) => this.invoke('get-test-record', id)
   allTestsGrouped = () => this.invoke('all-tests-grouped')
   addTestCategory = (category: string) => this.invoke('add-test-category', { category })
   addTest = (category: string, name: string, normal_value?: string | null) =>

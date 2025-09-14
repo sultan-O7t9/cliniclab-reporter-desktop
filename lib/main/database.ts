@@ -534,16 +534,34 @@ export function seedDatabase() {
     created_at TEXT DEFAULT CURRENT_TIMESTAMP
   )`)
 
-  // Migration: add patient_father_or_husband column if missing (older db versions)
+  // Create index to speed up patient_name searches (case-insensitive comparisons use lowered value)
   try {
-    const info = database.prepare('PRAGMA table_info(test_records)').all() as { name: string }[]
-    const hasCol = info.some((c) => c.name === 'patient_father_or_husband')
-    if (!hasCol) {
-      database.exec('ALTER TABLE test_records ADD COLUMN patient_father_or_husband TEXT')
-      console.warn('[DB] Added column patient_father_or_husband to test_records')
-    }
+    database.exec('CREATE INDEX IF NOT EXISTS idx_test_records_patient_name ON test_records(patient_name)')
   } catch (err) {
-    console.error('[DB] Failed to ensure patient_father_or_husband column', err)
+    console.warn('[DB] Failed to create patient_name index', err)
+  }
+
+  // Optional FTS5 virtual table for patient name prefix/full-text search (fallback to LIKE if unavailable)
+  try {
+    database.exec(
+      `CREATE VIRTUAL TABLE IF NOT EXISTS test_records_fts USING fts5(patient_name, content='test_records', content_rowid='id')`
+    )
+    // Sync existing rows if newly created
+    database.exec(`INSERT INTO test_records_fts(rowid, patient_name)
+                   SELECT id, COALESCE(patient_name,'') FROM test_records
+                   WHERE NOT EXISTS (SELECT 1 FROM test_records_fts WHERE rowid = test_records.id)`)
+    // Triggers to keep FTS in sync
+    database.exec(`CREATE TRIGGER IF NOT EXISTS test_records_ai AFTER INSERT ON test_records BEGIN
+        INSERT INTO test_records_fts(rowid, patient_name) VALUES (new.id, COALESCE(new.patient_name,''));
+      END;`)
+    database.exec(`CREATE TRIGGER IF NOT EXISTS test_records_ad AFTER DELETE ON test_records BEGIN
+        DELETE FROM test_records_fts WHERE rowid = old.id;
+      END;`)
+    database.exec(`CREATE TRIGGER IF NOT EXISTS test_records_au AFTER UPDATE OF patient_name ON test_records BEGIN
+        UPDATE test_records_fts SET patient_name = COALESCE(new.patient_name,'') WHERE rowid = new.id;
+      END;`)
+  } catch (err) {
+    console.warn('[DB] FTS5 not available or failed to initialize, will fallback to LIKE search', err)
   }
 
   // Idempotent seed: always attempt to insert defaults; skip existing pairs (category,name)

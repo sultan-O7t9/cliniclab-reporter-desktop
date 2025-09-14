@@ -342,10 +342,111 @@ export const registerAppHandlers = (app: App) => {
   handle('recent-test-records', ({ limit }: { limit: number }) => {
     const db = getDb()
     const stmt = db.prepare(
-      `SELECT id, patient_name, patient_age, patient_sex, patient_father_or_husband, created_at
+      `SELECT id, patient_name, patient_age, patient_sex, patient_father_or_husband, created_at, payload
        FROM test_records ORDER BY id DESC LIMIT ?`
     )
-    return stmt.all(limit)
+    const rows = stmt.all(limit) as any[]
+    return rows.map((r) => {
+      let cats: string | null = null
+      try {
+        if (r.payload) {
+          const parsed = JSON.parse(r.payload)
+          if (parsed && Array.isArray(parsed.tests)) {
+            const set = new Set<string>()
+            for (const g of parsed.tests) {
+              if (g?.category) set.add(String(g.category))
+            }
+            cats = Array.from(set).join(', ')
+          }
+        }
+      } catch {
+        /* ignore parse errors */
+      }
+      return {
+        id: r.id,
+        patient_name: r.patient_name,
+        patient_age: r.patient_age,
+        patient_sex: r.patient_sex,
+        patient_father_or_husband: r.patient_father_or_husband,
+        created_at: r.created_at,
+        test_categories: cats,
+      }
+    })
+  })
+  handle('search-test-records', ({ query, limit }: { query: string; limit: number }) => {
+    const db = getDb()
+    const trimmed = (query || '').trim()
+    if (!trimmed) return []
+    let rows: any[] = []
+    try {
+      // Try FTS5 MATCH first (prefix search with *) safely escaping quotes
+      const ftsTerm = trimmed
+        .replace(/['"`]/g, ' ')
+        .split(/\s+/)
+        .filter(Boolean)
+        .map((t) => t + '*')
+        .join(' ')
+      const stmt =
+        db.prepare(`SELECT r.id, r.patient_name, r.patient_age, r.patient_sex, r.patient_father_or_husband, r.created_at, r.payload
+        FROM test_records_fts f JOIN test_records r ON f.rowid = r.id
+        WHERE f.patient_name MATCH ? ORDER BY r.id DESC LIMIT ?`)
+      rows = stmt.all(ftsTerm, limit) as any[]
+    } catch {
+      // Fallback to LIKE (case-insensitive)
+      const like = `%${trimmed.toLowerCase()}%`
+      const stmt =
+        db.prepare(`SELECT id, patient_name, patient_age, patient_sex, patient_father_or_husband, created_at, payload
+        FROM test_records WHERE LOWER(patient_name) LIKE ? ORDER BY id DESC LIMIT ?`)
+      rows = stmt.all(like, limit) as any[]
+    }
+    return rows.map((r) => {
+      let cats: string | null = null
+      try {
+        if (r.payload) {
+          const parsed = JSON.parse(r.payload)
+          if (parsed && Array.isArray(parsed.tests)) {
+            const set = new Set<string>()
+            for (const g of parsed.tests) if (g?.category) set.add(String(g.category))
+            cats = Array.from(set).join(', ')
+          }
+        }
+      } catch {
+        /* ignore parse error */
+      }
+      return {
+        id: r.id,
+        patient_name: r.patient_name,
+        patient_age: r.patient_age,
+        patient_sex: r.patient_sex,
+        patient_father_or_husband: r.patient_father_or_husband,
+        created_at: r.created_at,
+        test_categories: cats,
+      }
+    })
+  })
+  handle('get-test-record', (id: number) => {
+    const db = getDb()
+    const row = db
+      .prepare(
+        'SELECT id, patient_name, patient_age, patient_sex, patient_father_or_husband, payload, created_at FROM test_records WHERE id = ?'
+      )
+      .get(id) as any
+    if (!row) return null
+    let parsed: any = null
+    try {
+      parsed = JSON.parse(row.payload)
+    } catch {
+      /* ignore parse error */
+    }
+    return {
+      id: row.id,
+      patient_name: row.patient_name,
+      patient_age: row.patient_age,
+      patient_sex: row.patient_sex,
+      patient_father_or_husband: row.patient_father_or_husband,
+      created_at: row.created_at,
+      report: parsed,
+    }
   })
   handle('all-tests-grouped', () => {
     const db = getDb()

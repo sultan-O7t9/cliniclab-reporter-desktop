@@ -86,8 +86,23 @@ export const appIpcSchema = {
         patient_sex: z.string().nullable().optional(),
         patient_father_or_husband: z.string().nullable().optional(),
         created_at: z.string().nullable().optional(),
+        test_categories: z.string().nullable().optional(),
       })
     ),
+  },
+  'get-test-record': {
+    args: z.tuple([z.number()]),
+    return: z
+      .object({
+        id: z.number(),
+        patient_name: z.string().nullable().optional(),
+        patient_age: z.number().nullable().optional(),
+        patient_sex: z.string().nullable().optional(),
+        patient_father_or_husband: z.string().nullable().optional(),
+        created_at: z.string().nullable().optional(),
+        report: z.any().nullable().optional(),
+      })
+      .nullable(),
   },
   // New: get all tests grouped by category
   'all-tests-grouped': {
@@ -171,5 +186,25 @@ export const appIpcSchema = {
       ),
     ]),
     return: z.object({ inserted: z.number(), skipped: z.number() }),
+  },
+  // New: search test records by patient name (case-insensitive)
+  'search-test-records': {
+    args: z.tuple([
+      z.object({
+        query: z.string().min(1),
+        limit: z.number().min(1).max(500).default(50),
+      }),
+    ]),
+    return: z.array(
+      z.object({
+        id: z.number(),
+        patient_name: z.string().nullable(),
+        patient_age: z.number().nullable().optional(),
+        patient_sex: z.string().nullable().optional(),
+        patient_father_or_husband: z.string().nullable().optional(),
+        created_at: z.string().nullable().optional(),
+        test_categories: z.string().nullable().optional(),
+      })
+    ),
   },
 }
