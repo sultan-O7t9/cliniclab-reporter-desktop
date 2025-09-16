@@ -21,15 +21,37 @@ export const registerAppHandlers = (app: App) => {
 
   const getLogoDataUri = () => {
     try {
-      const possible = [
-        path.join(resolveResourcesDir(), 'icons', 'clinic-logo.png'),
-        path.join(resolveResourcesDir(), 'icons', 'icon.png'),
+      const resourceDir = resolveResourcesDir()
+      const resourcePaths = [
+        path.join(resourceDir, 'icons', 'clinic-logo.png'),
+        path.join(resourceDir, 'icons', 'logo.png'),
+        path.join(resourceDir, 'icons', 'icon.png'),
+        path.join(resourceDir, 'icons', 'logo.svg'),
       ]
-      const file = possible.find((p) => fs.existsSync(p))
-      if (!file) return ''
-      const data = fs.readFileSync(file)
-      return 'data:image/png;base64,' + data.toString('base64')
-    } catch {
+      // In packaged build, also check app.asar.unpacked/resources/icons
+      if (app.isPackaged) {
+        const unpackedBase = path.join(process.resourcesPath, 'app.asar.unpacked', 'resources', 'icons')
+        resourcePaths.push(
+          path.join(unpackedBase, 'clinic-logo.png'),
+          path.join(unpackedBase, 'logo.png'),
+          path.join(unpackedBase, 'icon.png'),
+          path.join(unpackedBase, 'logo.svg')
+        )
+      }
+      const file = resourcePaths.find((p) => fs.existsSync(p))
+      if (!file) {
+        console.warn('[PDF] Logo not found in resources/icons/. Tried:', resourcePaths)
+        return ''
+      }
+      if (file.endsWith('.svg')) {
+        const data = fs.readFileSync(file)
+        return 'data:image/svg+xml;base64,' + data.toString('base64')
+      } else {
+        const data = fs.readFileSync(file)
+        return 'data:image/png;base64,' + data.toString('base64')
+      }
+    } catch (e) {
+      console.warn('[PDF] Error loading logo:', e)
       return ''
     }
   }
@@ -157,7 +179,7 @@ export const registerAppHandlers = (app: App) => {
               </tr>`
           )
           .join('')
-        const html = `<div class="report-group" style="margin-bottom:22px;">
+        const html = `<div class="report-group" style="margin-bottom:24px;">
               <div class="group-title">${escapeHtml(cat.category)}</div>
               <table class="report-table equal-cols">
                 <thead>${headerRow}</thead>
@@ -170,26 +192,35 @@ export const registerAppHandlers = (app: App) => {
 
     const urineIndex = groupEntries.findIndex((g) => g.urine)
     const tableSections = groupEntries
-      .map((entry, idx) => {
+      .map((entry, idx, arr) => {
         // If urine report: ensure it's isolated on its own page
         if (entry.urine) {
-          const before = idx === 0 ? '' : '<div class="page-break"></div>'
+          // Only add a page break before if previous group did not already end with a page break
+          const prevIsPageBreak = idx > 0 && (idx % 4 === 0 || arr[idx - 1]?.breakAfter)
+          const before = idx === 0 || prevIsPageBreak ? '' : '<div class="page-break"></div>'
           const after = idx === groupEntries.length - 1 ? '' : '<div class="page-break"></div>'
           return before + `<div class="urine-wrapper">${entry.html}</div>` + after
         }
         const isEndOfPage = (idx + 1) % 4 === 0 && idx !== groupEntries.length - 1
         let suffix = ''
-        // If there is a urine report elsewhere and this entry is adjacent, force page break boundaries
         if (entry.breakAfter) {
           suffix =
             '<div class="manual-break-spacer" aria-hidden="true"></div><div class="page-break"></div><div class="page-top-spacer"></div>'
         } else if (isEndOfPage) {
-          suffix = '<div class="page-break"></div><div class="page-top-spacer"></div>'
+          // Only add page break if next group is not urine
+          const nextIsUrine = arr[idx + 1]?.urine
+          if (!nextIsUrine) {
+            suffix = '<div class="page-break"></div><div class="page-top-spacer"></div>'
+          }
         } else if (urineIndex !== -1 && idx > urineIndex && idx === urineIndex + 1) {
-          // First normal group after urine report
           suffix = '<div class="page-top-spacer"></div>'
         }
-        return entry.html + suffix
+        // Remove margin-bottom if this is the 4th group or a page break follows
+        let html = entry.html
+        if (isEndOfPage || entry.breakAfter) {
+          html = html.replace('style="margin-bottom:24px;"', 'style="margin-bottom:0;"')
+        }
+        return html + suffix
       })
       .join('')
     const PHONE_DISPLAY = '0349 4695920'
@@ -203,41 +234,57 @@ export const registerAppHandlers = (app: App) => {
   <style>
   * {color:#17365d;}
   body { margin:24px; font-family:Arial,Helvetica,sans-serif; }
+  .clinic-header * {
+  line-height:1.5;}
   .clinic-header { text-align:center; margin-bottom:24px; position:relative; }
-  .clinic-header .logo { position:absolute; left:0; top:0; height:70px; }
-  .clinic-header .qr { position:absolute; right:128px; top:48px; height:48px; width:48px; object-fit:contain; }
+
+  .clinic-header .qr { position:absolute; right:64px; bottom:0px;  align-self:flex-end;  height:56px; width:56px; object-fit:contain; }
   .clinic-header .phone-label { position:absolute; right:90px; top:4px; font-size:12px; font-family:Cambria,serif; font-weight:600; letter-spacing:0.5px; }
+  .logo-container{
+  display:flex;
+  align-items:center;
+  justify-content:center;
+      position:relative;
+
+  }
+  .logo {
+
+      height: 200px;
+      width: auto;
+      display: block;
+
+  }
   .clinic-header .title {text-decoration:underline; font-size:36px;color:#17365d;font-family:Cambria,serif; font-weight:700; letter-spacing:1px; }
-  .clinic-header .subtitle1 {color:#17365d; font-size:10px; margin-top:4px; font-family:Arial,sans-serif;}
-  .clinic-header .subtitle2, .clinic-header .subtitle3 { font-size:10px; font-family:Arial,sans-serif; line-height:1.2; margin-top:2px; color:#17365d; }
-  .patient-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:4px 12px; font-family:Cambria,serif; font-size:10px; color:#17365d; max-width:70%;margin:0 auto 16px; }
+  .clinic-header .subtitle1 {color:#17365d; font-size:10px; margin-top:20px; font-family:Arial,sans-serif;}
+  .clinic-header .subtitle2, .clinic-header .subtitle3 { font-size:12px; font-family:Arial,sans-serif; line-height:1.2; margin-top:2px; color:#17365d; }
+  .patient-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:4px 12px; font-family:Cambria,serif; font-size:12px; color:#17365d; max-width:80%;margin:0 auto 16px; }
   .patient-grid .cell {text-transform:uppercase; line-height:1.3; }
   .patient-grid .lbl {text-wrap:nowrap; text-transform:uppercase; margin-right:4px; }
-  .report-group { page-break-inside: avoid; break-inside: avoid; margin-bottom:22px; }
+  .report-group { page-break-inside: avoid; break-inside: avoid; margin-bottom:26px; }
   .page-break { page-break-after: always; break-after: page; }
   .content-wrapper { padding-bottom:70px; }
   .page-top-spacer { height:18px; }
   .footer { position:fixed; bottom:20px; left:24px; right:24px; font-size:12px;width:100%;display:flex;justify-content:flex-end;color:#17365d; }
   .footer .label {color:#17365d; font-size:14px; font-family:Cambria,serif; margin-right:8px; }
-  .report-table { border-collapse:collapse; width:100%; max-width:70%; margin:0 auto 8px; table-layout:fixed; }
+  .report-table { border-collapse:collapse; width:100%; max-width:80%; margin:0 auto 8px; table-layout:fixed; }
   .report-table.equal-cols th, .report-table.equal-cols td { width:33.3333%; }
   .report-table thead { border:1.5px solid #17365d; }
-  .report-table th, .report-table td {  padding:6px 6px; font-size:11px; font-family:Cambria,serif; text-align:center; vertical-align:middle; }
+  .report-table th, .report-table td {  padding:6px 6px; font-size:13px; font-family:Cambria,serif; text-align:center; vertical-align:middle; }
   .report-table th { padding:2px 6px; }
   .report-table thead th { background:#f0f0f0; font-weight:600; }
   .group-title { font-family:Cambria,serif; font-size:18px; font-weight:bold; margin:12px auto 6px; text-align:center; }
-  .lbl-small { font-size:9px; }
+  .lbl-small { font-size:11px; }
   .manual-break-spacer { height:48px; }
   /* Urine report styles */
   .urine-wrapper { page-break-inside:avoid; break-inside:avoid; }
-  .urine-report-page { max-width:80%; margin:0 auto 12px; font-family:Cambria,serif; font-size:11px; }
-  .urine-title { text-align:center; font-size:22px; font-weight:bold; margin:12px 0 16px; }
-  .urine-top-grid {font-family:Calibri,sans-serif; font-size:12px; text-transform:uppercase;  display:grid; grid-template-columns:repeat(4,1fr);  border:1px solid #17365d; border-bottom:none; padding:4px 10px; }
+  .urine-report-page { max-width:80%; margin:0 auto 12px; font-family:Cambria,serif; font-size:12px; line-height:1.5; }
+  .urine-title { text-align:center; font-size:24px; font-weight:bold; margin:12px 0 24px; }
+  .urine-top-grid {font-family:Calibri,sans-serif; font-size:14px; text-transform:uppercase;  display:grid; grid-template-columns:repeat(4,1fr);  border:1px solid #17365d; border-bottom:none; padding:4px 12px; }
   .urine-top-row { display:flex; flex-wrap:wrap; gap:8px 24px; margin:2px 0; }
   .urine-label { min-width:90px; }
   .urine-value { min-width:60px;  padding:0 4px; }
   .urine-divider { border-top:1px solid #17365d; margin:8px 0 10px; }
-  .urine-columns { display:flex; align-items:flex-start; border:1px solid #17365d; font-family:Calibri,sans-serif; font-size:12px; text-transform:uppercase; }
+  .urine-columns { display:flex; align-items:flex-start; border:1px solid #17365d; font-family:Calibri,sans-serif; font-size:13px; text-transform:uppercase; }
   .urine-col { flex:1; }
   .urine-col:first-child { border-right:1px solid #17365d; }
   .urine-col-head { text-transform:uppercase;  text-align:center;border-bottom:1px solid #17365d; }
@@ -254,14 +301,19 @@ export const registerAppHandlers = (app: App) => {
 </head>
 <body>
   <div class="clinic-header">
+  <div class="logo-container">
+  ${logoDataUri ? `<img class="logo" src="${logoDataUri}" />` : ''}
 
-    ${qrDataUri ? `<img class="qr" src="${qrDataUri}" />` : ''}
-    <div class="title">SHAMIM ARSHAD CLINIC</div>
-
-    <b class="subtitle1">NOT VALID FOR ANY COURT</b>
-    <div class="subtitle2">OPPOSITE FAUJI TOWER EID GAAH CHOWK <b>KUNJAH</b></div>
-    <div class="subtitle3">CELL NUMBER <b>--- ${PHONE_DISPLAY}</b></div>
   </div>
+
+
+<div style="position:relative">
+<i class="subtitle1">NOT VALID FOR ANY COURT</i>
+<div class="subtitle2">OPPOSITE FAUJI TOWER EID GAAH CHOWK <b>KUNJAH</b></div>
+<div class="subtitle3">CELL NUMBER <b>--- ${PHONE_DISPLAY}</b></div>
+</div>
+ ${qrDataUri ? `<img class="qr" src="${qrDataUri}" />` : ''}
+</div>
   <div class="patient-grid">
     <div class="cell"><span class="lbl">Patient Name</span></div>
     <div class="cell"><b class="lbl">${escapeHtml(patientName) || '—'}</b></div>

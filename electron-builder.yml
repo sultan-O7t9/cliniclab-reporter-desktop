@@ -14,7 +14,7 @@ asarUnpack:
 win:
   executableName: ClinicLabReporter
 nsis:
-  artifactName: ${name}-${version}-setup.${ext}
+  artifactName: ${version}-setup.${ext}
   shortcutName: ${productName}
   uninstallDisplayName: ${productName}
   createDesktopShortcut: always
