@@ -10,51 +10,7 @@ export const menuItems: TitlebarMenu[] = [
       },
     ],
   },
-  {
-    name: 'Edit',
-    items: [
-      {
-        name: 'Undo',
-        action: 'web-undo',
-        shortcut: 'Ctrl+Z',
-      },
-      {
-        name: 'Redo',
-        action: 'web-redo',
-        shortcut: 'Ctrl+Y',
-      },
-      {
-        name: '---',
-      },
-      {
-        name: 'Cut',
-        action: 'web-cut',
-        shortcut: 'Ctrl+X',
-      },
-      {
-        name: 'Copy',
-        action: 'web-copy',
-        shortcut: 'Ctrl+C',
-      },
-      {
-        name: 'Paste',
-        action: 'web-paste',
-        shortcut: 'Ctrl+V',
-      },
-      {
-        name: 'Delete',
-        action: 'web-delete',
-      },
-      {
-        name: '---',
-      },
-      {
-        name: 'Select All',
-        action: 'web-select-all',
-        shortcut: 'Ctrl+A',
-      },
-    ],
-  },
+
   {
     name: 'View',
     items: [
@@ -129,17 +85,6 @@ export const menuItems: TitlebarMenu[] = [
         name: 'Close',
         action: 'window-close',
         shortcut: 'Ctrl+W',
-      },
-    ],
-  },
-  {
-    name: 'Credits',
-    items: [
-      {
-        name: 'Guasam',
-        action: 'web-open-url',
-        actionParams: ['https://github.com/guasam'],
-        shortcut: '@guasam',
       },
     ],
   },

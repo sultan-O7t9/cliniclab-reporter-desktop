@@ -10,11 +10,18 @@ interface PatientForm {
 
 const initialState: PatientForm = { name: '', age: '', sex: 'Female', fatherOrHusband: '' }
 
+interface TestItem {
+  id: number
+  name: string
+  normal_value?: string | null
+  required?: boolean | null
+  children?: TestItem[]
+}
 interface TestGroup {
   id: string
   category: string
-  tests: any[]
-  selected: Record<string, { result: string }>
+  tests: TestItem[]
+  selected: Record<number, { result: string }>
   loading: boolean
   breakAfter?: boolean
 }
@@ -56,11 +63,21 @@ export const PatientPage: React.FC = () => {
     if (!category) return
     let mounted = true
     window.conveyor.app
-      .testsByCategory(category)
-      .then((rows) => {
+      .testsByCategoryNested(category)
+      .then((resp) => {
         if (!mounted) return
-        // Auto-select required tests
-        const requiredNames = rows.filter((r: any) => r.required).map((r: any) => r.name)
+        const rows: TestItem[] = (resp?.tests as any[]) || []
+        // Auto-select required tests (both standalone and children)
+        const requiredIds: number[] = []
+        const walk = (items: TestItem[]) => {
+          for (const it of items) {
+            if (it.required) requiredIds.push(it.id)
+            if (Array.isArray(it.children) && it.children.length) {
+              walk(it.children)
+            }
+          }
+        }
+        walk(rows)
         setGroups((gs) =>
           gs.map((g) =>
             g.id === groupId
@@ -68,8 +85,8 @@ export const PatientPage: React.FC = () => {
                   ...g,
                   tests: rows,
                   loading: false,
-                  selected: requiredNames.reduce<Record<string, { result: string }>>((acc, name) => {
-                    acc[name] = { result: '' }
+                  selected: requiredIds.reduce<Record<number, { result: string }>>((acc, id) => {
+                    acc[id] = { result: '' }
                     return acc
                   }, {}),
                 }
@@ -86,21 +103,21 @@ export const PatientPage: React.FC = () => {
     }
   }
 
-  const toggleTest = (groupId: string, testName: string) => {
+  const toggleTest = (groupId: string, testId: number) => {
     setGroups((gs) =>
       gs.map((g) => {
         if (g.id !== groupId) return g
         const selected = { ...g.selected }
-        if (selected[testName]) delete selected[testName]
-        else selected[testName] = { result: '' }
+        if (selected[testId]) delete selected[testId]
+        else selected[testId] = { result: '' }
         return { ...g, selected }
       })
     )
   }
 
-  const updateResult = (groupId: string, testName: string, value: string) => {
+  const updateResult = (groupId: string, testId: number, value: string) => {
     setGroups((gs) =>
-      gs.map((g) => (g.id === groupId ? { ...g, selected: { ...g.selected, [testName]: { result: value } } } : g))
+      gs.map((g) => (g.id === groupId ? { ...g, selected: { ...g.selected, [testId]: { result: value } } } : g))
     )
   }
 
@@ -136,31 +153,48 @@ export const PatientPage: React.FC = () => {
     setGroups((gs) => gs.map((g) => (g.id === groupId ? { ...g, breakAfter: !g.breakAfter } : g)))
   }
 
+  // Preview removed per request; direct print only
+
   const handlePrint = () => {
     const testsPayload = groups
       .filter((g) => g.category)
       .map((g) => {
-        const chosen = Object.keys(g.selected).map((name) => {
-          const meta = g.tests.find((t) => t.name === name) || {}
-          const result = g.selected[name].result.trim()
-            ? g.selected[name].result.toLowerCase() === 'negative' ||
-              g.selected[name].result.toLowerCase() === 'positive'
-              ? g.selected[name].result.toUpperCase()
-              : g.selected[name].result
-            : '-'
-          return {
-            id: (meta as any).id,
-            name,
-            result,
-            normal: (meta as any).normal_value || (meta as any).normal || '',
-            category: (meta as any).category || g.category,
+        // Build nested payload: for each root, include either standalone selection or selected children
+        const roots = g.tests
+        const items: any[] = []
+        const upperPosNeg = (v: string) =>
+          v.trim() ? (['negative', 'positive'].includes(v.trim().toLowerCase()) ? v.trim().toUpperCase() : v) : '-'
+        const buildForRoot = (root: TestItem) => {
+          const hasChildren = Array.isArray(root.children) && root.children.length > 0
+          if (hasChildren) {
+            const childList = Array.isArray(root.children) ? root.children : []
+            const selectedChildren = childList
+              .filter((ch) => g.selected[ch.id])
+              .map((ch) => ({
+                name: ch.name,
+                result: upperPosNeg(g.selected[ch.id]?.result || ''),
+                normal: ch.normal_value || '',
+              }))
+            if (selectedChildren.length) {
+              items.push({
+                name: root.name,
+                category: g.category,
+                children: selectedChildren,
+              })
+            }
+          } else {
+            if (g.selected[root.id]) {
+              items.push({
+                name: root.name,
+                result: upperPosNeg(g.selected[root.id]?.result || ''),
+                normal: root.normal_value || '',
+                category: g.category,
+              })
+            }
           }
-        })
-        return {
-          category: g.category,
-          tests: [...chosen],
-          breakAfter: !!g.breakAfter,
         }
+        roots.forEach(buildForRoot)
+        return { category: g.category, tests: items, breakAfter: !!g.breakAfter }
       })
       .filter((g) => g.tests.length)
     if (!testsPayload.length) {
@@ -296,60 +330,160 @@ export const PatientPage: React.FC = () => {
                   </div>
                   {g.category && tests.length > 0 && (
                     <div className="test-rows" style={{ marginTop: 20 }}>
-                      {tests.map((t) => {
-                        const checked = !!g.selected[t.name]
-                        const checkboxId = `test-${g.id}-${t.name.replace(/\s+/g, '-').toLowerCase()}`
-                        return (
-                          <div>
-                            <div className={'test-row-main' + (checked ? ' selected' : '')}>
-                              <label
-                                htmlFor={checkboxId}
-                                className="test-row-label"
-                                style={{ display: 'flex', alignItems: 'center', gap: 12, cursor: 'pointer' }}
-                              >
-                                <input
-                                  id={checkboxId}
-                                  type="checkbox"
-                                  className="test-row-check"
-                                  checked={checked}
-                                  onChange={() => toggleTest(g.id, t.name)}
-                                  onKeyDown={(e) => {
-                                    if (e.key === 'Enter') {
-                                      e.preventDefault()
-                                      toggleTest(g.id, t.name)
-                                    }
-                                  }}
-                                  aria-label={`Select ${t.name}`}
-                                />
-                                <div
-                                  className="test-row-name"
-                                  style={{ display: 'flex', alignItems: 'center', gap: 6 }}
-                                >
-                                  <span>{t.name}</span>
-                                  {/* Example re-enable:
-                                  {t.required && (
-                                    <span className="badge-required" aria-label="Required test auto-selected" title="Required test auto-selected">Req</span>
+                      {tests
+                        .slice()
+                        .sort((a: any, b: any) => {
+                          const ao = typeof (a as any).sort_order === 'number' ? (a as any).sort_order : 999999
+                          const bo = typeof (b as any).sort_order === 'number' ? (b as any).sort_order : 999999
+                          if (ao !== bo) return ao - bo
+                          if (typeof (a as any).id === 'number' && typeof (b as any).id === 'number' && a.id !== b.id)
+                            return (a as any).id - (b as any).id
+                          return String((a as any).name).localeCompare(String((b as any).name))
+                        })
+                        .map((t) => {
+                          const hasChildren = Array.isArray(t.children) && t.children.length > 0
+                          if (!hasChildren) {
+                            const checked = !!g.selected[t.id]
+                            const checkboxId = `test-${g.id}-${t.id}`
+                            return (
+                              <div key={t.id}>
+                                <div className={'test-row-main' + (checked ? ' selected' : '')}>
+                                  <label
+                                    htmlFor={checkboxId}
+                                    className="test-row-label"
+                                    style={{ display: 'flex', alignItems: 'center', gap: 12, cursor: 'pointer' }}
+                                  >
+                                    <input
+                                      id={checkboxId}
+                                      type="checkbox"
+                                      className="test-row-check"
+                                      checked={checked}
+                                      onChange={() => toggleTest(g.id, t.id)}
+                                      onKeyDown={(e) => {
+                                        if (e.key === 'Enter') {
+                                          e.preventDefault()
+                                          toggleTest(g.id, t.id)
+                                        }
+                                      }}
+                                      aria-label={`Select ${t.name}`}
+                                    />
+                                    <div
+                                      className="test-row-name"
+                                      style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+                                    >
+                                      <span>{t.name}</span>
+                                    </div>
+                                  </label>
+                                  {checked ? (
+                                    <input
+                                      type="text"
+                                      className="test-row-result"
+                                      placeholder="Result"
+                                      value={g.selected[t.id]?.result || ''}
+                                      onChange={(e) => updateResult(g.id, t.id, e.target.value)}
+                                    />
+                                  ) : (
+                                    <div className="test-row-result-placeholder" />
                                   )}
-                                  */}
+                                  <p>{t.normal_value || ''}</p>
                                 </div>
-                              </label>
-                              {checked ? (
-                                <input
-                                  type="text"
-                                  className="test-row-result"
-                                  placeholder="Result"
-                                  value={g.selected[t.name]?.result || ''}
-                                  onChange={(e) => updateResult(g.id, t.name, e.target.value)}
-                                />
-                              ) : (
+                                <p></p>
+                              </div>
+                            )
+                          }
+                          // Parent with children: render parent label row (no checkbox/input), then child rows
+                          const parentRow = (
+                            <div key={`p-${t.id}`}>
+                              <div className={'test-row-main'}>
+                                <div
+                                  className="test-row-label"
+                                  style={{ display: 'flex', alignItems: 'center', gap: 12 }}
+                                >
+                                  <div
+                                    className="test-row-name"
+                                    style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+                                  >
+                                    <span style={{ fontWeight: 600 }}>{t.name}</span>
+                                  </div>
+                                </div>
                                 <div className="test-row-result-placeholder" />
-                              )}
-                              <p>{t.normal_value || t.normal || ''}</p>
+                                <p>{t.normal_value || ''}</p>
+                              </div>
+                              <p></p>
                             </div>
-                            <p></p>
-                          </div>
-                        )
-                      })}
+                          )
+                          const childRows = (t.children || [])
+                            .slice()
+                            .sort((a: any, b: any) => {
+                              const ao = typeof a.sort_order === 'number' ? a.sort_order : 999999
+                              const bo = typeof b.sort_order === 'number' ? b.sort_order : 999999
+                              if (ao !== bo) return ao - bo
+                              if (typeof a.id === 'number' && typeof b.id === 'number' && a.id !== b.id)
+                                return a.id - b.id
+                              return String(a.name).localeCompare(String(b.name))
+                            })
+                            .map((ch) => {
+                              const checked = !!g.selected[ch.id]
+                              const checkboxId = `test-${g.id}-${ch.id}`
+                              return (
+                                <div key={ch.id}>
+                                  <div className={'test-row-main' + (checked ? ' selected' : '')}>
+                                    <label
+                                      htmlFor={checkboxId}
+                                      className="test-row-label"
+                                      style={{
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        gap: 12,
+                                        cursor: 'pointer',
+                                        paddingLeft: 16,
+                                      }}
+                                    >
+                                      <input
+                                        id={checkboxId}
+                                        type="checkbox"
+                                        className="test-row-check"
+                                        checked={checked}
+                                        onChange={() => toggleTest(g.id, ch.id)}
+                                        onKeyDown={(e) => {
+                                          if (e.key === 'Enter') {
+                                            e.preventDefault()
+                                            toggleTest(g.id, ch.id)
+                                          }
+                                        }}
+                                        aria-label={`Select ${ch.name}`}
+                                      />
+                                      <div
+                                        className="test-row-name"
+                                        style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+                                      >
+                                        <span>{ch.name}</span>
+                                      </div>
+                                    </label>
+                                    {checked ? (
+                                      <input
+                                        type="text"
+                                        className="test-row-result"
+                                        placeholder="Result"
+                                        value={g.selected[ch.id]?.result || ''}
+                                        onChange={(e) => updateResult(g.id, ch.id, e.target.value)}
+                                      />
+                                    ) : (
+                                      <div className="test-row-result-placeholder" />
+                                    )}
+                                    <p>{ch.normal_value || ''}</p>
+                                  </div>
+                                  <p></p>
+                                </div>
+                              )
+                            })
+                          return (
+                            <React.Fragment key={`group-${t.id}`}>
+                              {parentRow}
+                              {childRows}
+                            </React.Fragment>
+                          )
+                        })}
                     </div>
                   )}
                   {g.category && tests.length === 0 && !g.loading && (

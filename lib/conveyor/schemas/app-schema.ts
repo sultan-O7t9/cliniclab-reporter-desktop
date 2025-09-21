@@ -39,9 +39,20 @@ export const appIpcSchema = {
             tests: z.array(
               z.object({
                 name: z.string(),
-                result: z.string(),
+                result: z.string().optional().nullable(),
                 normal: z.string().optional().nullable(),
                 category: z.string(),
+                // Optional nested children for hierarchical tests
+                children: z
+                  .array(
+                    z.object({
+                      name: z.string(),
+                      result: z.string(),
+                      normal: z.string().optional().nullable(),
+                    })
+                  )
+                  .optional()
+                  .nullable(),
               })
             ),
           })
@@ -74,6 +85,16 @@ export const appIpcSchema = {
       }),
     ]),
     return: z.object({ printed: z.boolean(), error: z.string().optional() }),
+  },
+  // Generate PDF for preview / high quality printing (scale ~0.5 - 2.0)
+  'print-to-pdf': {
+    args: z.tuple([
+      z.object({
+        report: z.any(),
+        scale: z.number().optional().default(1),
+      }),
+    ]),
+    return: z.object({ filePath: z.string(), dataUrl: z.string().optional() }),
   },
   // New: list recent test record summaries
   'recent-test-records': {
@@ -119,10 +140,59 @@ export const appIpcSchema = {
             required: z.boolean().optional(),
             sort_order: z.number().nullable().optional(),
             timestamp: z.string().nullable().optional(),
+            // Optional parent-child nesting
+            parent_id: z.number().nullable().optional(),
+            children: z
+              .array(
+                z.object({
+                  id: z.number(),
+                  name: z.string(),
+                  result: z.string().nullable().optional(),
+                  normal_value: z.string().nullable().optional(),
+                  required: z.boolean().optional(),
+                  sort_order: z.number().nullable().optional(),
+                  timestamp: z.string().nullable().optional(),
+                  parent_id: z.number().nullable().optional(),
+                })
+              )
+              .optional(),
           })
         ),
       })
     ),
+  },
+  // New: tests by category with explicit nesting
+  'tests-by-category-nested': {
+    args: z.tuple([z.string()]),
+    return: z.object({
+      category: z.string(),
+      tests: z.array(
+        z.object({
+          id: z.number(),
+          name: z.string(),
+          result: z.string().nullable().optional(),
+          normal_value: z.string().nullable().optional(),
+          required: z.boolean().optional(),
+          sort_order: z.number().nullable().optional(),
+          timestamp: z.string().nullable().optional(),
+          parent_id: z.number().nullable().optional(),
+          children: z
+            .array(
+              z.object({
+                id: z.number(),
+                name: z.string(),
+                result: z.string().nullable().optional(),
+                normal_value: z.string().nullable().optional(),
+                required: z.boolean().optional(),
+                sort_order: z.number().nullable().optional(),
+                timestamp: z.string().nullable().optional(),
+                parent_id: z.number().nullable().optional(),
+              })
+            )
+            .optional(),
+        })
+      ),
+    }),
   },
   // New: add a test category
   'add-test-category': {
@@ -167,6 +237,7 @@ export const appIpcSchema = {
         result: z.string().nullable().optional(),
         required: z.boolean().optional(),
         sort_order: z.number().nullable().optional(),
+        parent_id: z.number().nullable().optional(),
       })
     ),
   },
@@ -182,10 +253,23 @@ export const appIpcSchema = {
           result: z.string().optional().nullable(),
           required: z.boolean().optional(),
           sort_order: z.number().nullable().optional(),
+          parent_id: z.number().nullable().optional(),
         })
       ),
     ]),
     return: z.object({ inserted: z.number(), skipped: z.number() }),
+  },
+  // New: add a child test under a parent
+  'add-child-test': {
+    args: z.tuple([
+      z.object({
+        category: z.string().min(1),
+        parent_id: z.number().min(1),
+        name: z.string().min(1),
+        normal_value: z.string().optional().nullable(),
+      }),
+    ]),
+    return: z.object({ id: z.number(), inserted: z.boolean() }),
   },
   // New: search test records by patient name (case-insensitive)
   'search-test-records': {

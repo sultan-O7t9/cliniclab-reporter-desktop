@@ -5,8 +5,10 @@ import PatientPage from '@/app/components/patient/PatientPage'
 import RecordsPage from '@/app/components/records/RecordsPage'
 import TestsPage from '@/app/components/tests/TestsPage'
 import LogsPage from '@/app/components/logs/LogsPage'
+import { AuthProvider, useAuth } from '@/app/components/auth/AuthContext'
+import LoginScreen from '@/app/components/auth/LoginScreen'
 
-export default function App() {
+const AppShell: React.FC = () => {
   const [active, setActive] = useState('patients')
 
   const renderPage = () => {
@@ -30,5 +32,19 @@ export default function App() {
         {renderPage()}
       </main>
     </div>
+  )
+}
+
+const RootGate: React.FC = () => {
+  const { authed } = useAuth()
+  if (!authed) return <LoginScreen />
+  return <AppShell />
+}
+
+export default function App() {
+  return (
+    <AuthProvider>
+      <RootGate />
+    </AuthProvider>
   )
 }

@@ -15,6 +15,8 @@ interface TestRow {
   result?: string | null
   required?: boolean | null
   timestamp?: string | null
+  parent_id?: number | null
+  children?: TestRow[]
 }
 interface GroupedTests {
   category: string
@@ -31,6 +33,9 @@ export const TestsPage: React.FC = () => {
   const [reseedStatus, setReseedStatus] = useState('')
   const fileInputRef = React.useRef<HTMLInputElement | null>(null)
   const [confirmResetOpen, setConfirmResetOpen] = useState(false)
+  const [addingChildFor, setAddingChildFor] = useState<number | null>(null)
+  const [childName, setChildName] = useState('')
+  const [childNormal, setChildNormal] = useState('')
 
   const load = async () => {
     setLoading(true)
@@ -60,6 +65,26 @@ export const TestsPage: React.FC = () => {
     setSaving(true)
     try {
       await window.conveyor.app.updateTestNormal(id, normal)
+    } finally {
+      setSaving(false)
+    }
+  }
+  const startAddChild = (parentId: number) => {
+    setAddingChildFor(parentId)
+    setChildName('')
+    setChildNormal('')
+  }
+  const submitAddChild = async (category: string) => {
+    if (!addingChildFor || !childName.trim()) return
+    setSaving(true)
+    try {
+      await window.conveyor.app.addChildTest(category, addingChildFor, childName.trim(), childNormal.trim() || null)
+      setAddingChildFor(null)
+      setChildName('')
+      setChildNormal('')
+      await load()
+    } catch (e) {
+      console.error('Failed to add child test', e)
     } finally {
       setSaving(false)
     }
@@ -269,64 +294,217 @@ export const TestsPage: React.FC = () => {
                 </thead>
                 <tbody>
                   {g.tests
+                    .slice()
+                    .sort((a: any, b: any) => {
+                      const ao = typeof (a as any).sort_order === 'number' ? (a as any).sort_order : 999999
+                      const bo = typeof (b as any).sort_order === 'number' ? (b as any).sort_order : 999999
+                      if (ao !== bo) return ao - bo
+                      if (typeof a.id === 'number' && typeof b.id === 'number' && a.id !== b.id) return a.id - b.id
+                      return String(a.name).localeCompare(String(b.name))
+                    })
                     .filter((t) => t.name !== '_placeholder_')
-                    .map((t) => (
-                      <tr key={t.id}>
-                        <td>{t.name}</td>
-                        <td style={{ textAlign: 'center' }}>
-                          <Switch
-                            checked={!!t.required}
-                            onCheckedChange={async (val) => {
-                              // optimistic update
-                              setGroups((prev) =>
-                                prev.map((grp) =>
-                                  grp.category === g.category
-                                    ? {
-                                        ...grp,
-                                        tests: grp.tests.map((row) =>
-                                          row.id === t.id ? { ...row, required: val } : row
-                                        ),
-                                      }
-                                    : grp
-                                )
-                              )
-                              try {
-                                await window.conveyor.app.updateTestRequired(t.id, !!val)
-                              } catch (err) {
-                                console.error('Failed to update required', err)
-                                // revert on failure
+                    .map((t) => {
+                      const parentRow = (
+                        <tr key={t.id}>
+                          <td>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                              <span>{t.name}</span>
+                              <button
+                                type="button"
+                                className="btn-win btn-secondary"
+                                style={{ padding: '2px 6px', fontSize: 12 }}
+                                onClick={() => startAddChild(t.id)}
+                                aria-label={`Add child test under ${t.name}`}
+                              >
+                                Add Child
+                              </button>
+                            </div>
+                          </td>
+                          <td style={{ textAlign: 'center' }}>
+                            <Switch
+                              checked={!!t.required}
+                              onCheckedChange={async (val) => {
+                                // optimistic update
                                 setGroups((prev) =>
                                   prev.map((grp) =>
                                     grp.category === g.category
                                       ? {
                                           ...grp,
                                           tests: grp.tests.map((row) =>
-                                            row.id === t.id ? { ...row, required: t.required } : row
+                                            row.id === t.id ? { ...row, required: val } : row
                                           ),
                                         }
                                       : grp
                                   )
                                 )
-                              }
-                            }}
-                            aria-label={`Toggle required for ${t.name}`}
-                          />
-                        </td>
-                        <td style={{ verticalAlign: 'middle' }}>
-                          <input
-                            defaultValue={t.normal_value || ''}
-                            aria-label={`Normal value for ${t.name}`}
-                            className="win-inline-input"
-                            onBlur={(e) => {
-                              const val = e.target.value.trim()
-                              if (val !== (t.normal_value || '')) {
-                                handleUpdateNormal(t.id, val)
-                              }
-                            }}
-                          />
-                        </td>
-                      </tr>
-                    ))}
+                                try {
+                                  await window.conveyor.app.updateTestRequired(t.id, !!val)
+                                } catch (err) {
+                                  console.error('Failed to update required', err)
+                                  // revert on failure
+                                  setGroups((prev) =>
+                                    prev.map((grp) =>
+                                      grp.category === g.category
+                                        ? {
+                                            ...grp,
+                                            tests: grp.tests.map((row) =>
+                                              row.id === t.id ? { ...row, required: t.required } : row
+                                            ),
+                                          }
+                                        : grp
+                                    )
+                                  )
+                                }
+                              }}
+                              aria-label={`Toggle required for ${t.name}`}
+                            />
+                          </td>
+                          <td style={{ verticalAlign: 'middle' }}>
+                            <input
+                              defaultValue={t.normal_value || ''}
+                              aria-label={`Normal value for ${t.name}`}
+                              className="win-inline-input"
+                              onBlur={(e) => {
+                                const val = e.target.value.trim()
+                                if (val !== (t.normal_value || '')) {
+                                  handleUpdateNormal(t.id, val)
+                                }
+                              }}
+                            />
+                          </td>
+                        </tr>
+                      )
+
+                      const addChildRow =
+                        addingChildFor === t.id ? (
+                          <tr key={`add-${t.id}`}>
+                            <td colSpan={3}>
+                              <div style={{ display: 'flex', gap: 8, alignItems: 'center', paddingLeft: 16 }}>
+                                <input
+                                  placeholder="Child Test name"
+                                  value={childName}
+                                  onChange={(e) => setChildName(e.target.value)}
+                                  className="win-inline-input"
+                                  style={{ width: 220 }}
+                                />
+                                <input
+                                  placeholder="Normal value (optional)"
+                                  value={childNormal}
+                                  onChange={(e) => setChildNormal(e.target.value)}
+                                  className="win-inline-input"
+                                  style={{ width: 220 }}
+                                />
+                                <button
+                                  type="button"
+                                  className="btn-win"
+                                  disabled={saving || !childName.trim()}
+                                  onClick={() => submitAddChild(g.category)}
+                                >
+                                  Create
+                                </button>
+                                <button
+                                  type="button"
+                                  className="btn-win btn-secondary"
+                                  onClick={() => setAddingChildFor(null)}
+                                >
+                                  Cancel
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        ) : null
+
+                      const childRows = (t.children || [])
+                        .slice()
+                        .sort((a: any, b: any) => {
+                          const ao = typeof (a as any).sort_order === 'number' ? (a as any).sort_order : 999999
+                          const bo = typeof (b as any).sort_order === 'number' ? (b as any).sort_order : 999999
+                          if (ao !== bo) return ao - bo
+                          if (typeof a.id === 'number' && typeof b.id === 'number' && a.id !== b.id) return a.id - b.id
+                          return String(a.name).localeCompare(String(b.name))
+                        })
+                        .map((ch) => (
+                          <tr key={ch.id}>
+                            <td>
+                              <div style={{ paddingLeft: 24 }}>{ch.name}</div>
+                            </td>
+                            <td style={{ textAlign: 'center' }}>
+                              <Switch
+                                checked={!!ch.required}
+                                onCheckedChange={async (val) => {
+                                  // optimistic update
+                                  setGroups((prev) =>
+                                    prev.map((grp) =>
+                                      grp.category === g.category
+                                        ? {
+                                            ...grp,
+                                            tests: grp.tests.map((row) =>
+                                              row.id === t.id
+                                                ? {
+                                                    ...row,
+                                                    children: (row.children || []).map((c) =>
+                                                      c.id === ch.id ? { ...c, required: val } : c
+                                                    ),
+                                                  }
+                                                : row
+                                            ),
+                                          }
+                                        : grp
+                                    )
+                                  )
+                                  try {
+                                    await window.conveyor.app.updateTestRequired(ch.id, !!val)
+                                  } catch (err) {
+                                    console.error('Failed to update required', err)
+                                    // revert on failure
+                                    setGroups((prev) =>
+                                      prev.map((grp) =>
+                                        grp.category === g.category
+                                          ? {
+                                              ...grp,
+                                              tests: grp.tests.map((row) =>
+                                                row.id === t.id
+                                                  ? {
+                                                      ...row,
+                                                      children: (row.children || []).map((c) =>
+                                                        c.id === ch.id ? { ...c, required: ch.required } : c
+                                                      ),
+                                                    }
+                                                  : row
+                                              ),
+                                            }
+                                          : grp
+                                      )
+                                    )
+                                  }
+                                }}
+                                aria-label={`Toggle required for ${ch.name}`}
+                              />
+                            </td>
+                            <td style={{ verticalAlign: 'middle' }}>
+                              <input
+                                defaultValue={ch.normal_value || ''}
+                                aria-label={`Normal value for ${ch.name}`}
+                                className="win-inline-input"
+                                onBlur={(e) => {
+                                  const val = e.target.value.trim()
+                                  if (val !== (ch.normal_value || '')) {
+                                    handleUpdateNormal(ch.id, val)
+                                  }
+                                }}
+                              />
+                            </td>
+                          </tr>
+                        ))
+
+                      return (
+                        <React.Fragment key={`row-${t.id}`}>
+                          {parentRow}
+                          {addChildRow}
+                          {childRows}
+                        </React.Fragment>
+                      )
+                    })}
                   {g.tests.filter((t) => t.name !== '_placeholder_').length === 0 && (
                     <tr>
                       <td colSpan={3} style={{ padding: 8, fontStyle: 'italic' }}>

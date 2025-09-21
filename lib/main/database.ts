@@ -561,13 +561,13 @@ export const DEFAULT_TESTS = [
     required: true,
     sort_order: 21,
   },
-]
+].map((t) => ({ ...t, parent_id: null }))
 
 export function reseedTests(custom?: typeof DEFAULT_TESTS) {
   const database = getDb()
   const rows = custom || DEFAULT_TESTS
   const insertIgnore = database.prepare(
-    'INSERT OR IGNORE INTO test (category, name, result, normal_value, required, sort_order) VALUES (@category, @name, @result, @normal_value, @required_int, @sort_order)'
+    'INSERT OR IGNORE INTO test (category, name, result, normal_value, required, sort_order, parent_id) VALUES (@category, @name, @result, @normal_value, @required_int, @sort_order, NULL)'
   )
   let inserted = 0
   for (const r of rows) {
@@ -610,10 +610,11 @@ export function seedDatabase() {
     normal_value TEXT,
     required INTEGER DEFAULT 0,
     sort_order INTEGER,
+    parent_id INTEGER,
     timestamp TEXT DEFAULT CURRENT_TIMESTAMP
   )`)
-  // Ensure uniqueness so we can safely INSERT OR IGNORE
-  database.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_test_category_name ON test(category, name)`)
+  // Note: Do not create indexes that reference parent_id before migration.
+  // Indexes are (re)created after ensuring columns exist below.
 
   // Migration: add required column if missing (older installations)
   try {
@@ -641,6 +642,23 @@ export function seedDatabase() {
         update.run(index++, r.id)
       }
     }
+    // Add parent_id column if missing
+    if (!cols.some((c) => c.name === 'parent_id')) {
+      database.exec('ALTER TABLE test ADD COLUMN parent_id INTEGER')
+      console.warn('[DB] Added parent_id column to test table')
+    }
+    // Recreate uniqueness with partial indexes; drop legacy index if present
+    try {
+      database.exec('DROP INDEX IF EXISTS idx_test_category_name')
+    } catch {
+      /* ignore */
+    }
+    database.exec(
+      `CREATE UNIQUE INDEX IF NOT EXISTS idx_test_cat_name_root ON test(category, name) WHERE parent_id IS NULL`
+    )
+    database.exec(
+      `CREATE UNIQUE INDEX IF NOT EXISTS idx_test_cat_name_parent ON test(category, name, parent_id) WHERE parent_id IS NOT NULL`
+    )
   } catch (err) {
     console.error('[DB] Failed to ensure required column on test table', err)
   }

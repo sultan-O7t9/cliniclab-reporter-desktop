@@ -155,8 +155,19 @@ export const registerAppHandlers = (app: App) => {
   </div>`
           return { html: urineHtml, breakAfter: true, category: categoryName, urine: true }
         }
-        const hasAnyNormal = tests.some((t) => t.normal && String(t.normal).trim() !== '')
-        const headerRow = `<tr>
+        // Determine if any test has children: if yes, use 4 columns (Test, Child Test, Result, Normal Value)
+        const anyChildren = tests.some((t: any) => Array.isArray(t.children) && t.children.length > 0)
+        const hasAnyNormal = tests.some(
+          (t) => (t.normal || t.normal_value) && String(t.normal || t.normal_value).trim() !== ''
+        )
+        const headerRow = anyChildren
+          ? `<tr>
+              <th>TEST NAME</th>
+              <th></th>
+              <th>RESULT</th>
+              <th>NORMAL VALUE</th>
+            </tr>`
+          : `<tr>
               <th>TEST NAME</th>
               ${hasAnyNormal ? '' : '<th></th>'}
               <th>RESULT</th>
@@ -169,15 +180,70 @@ export const registerAppHandlers = (app: App) => {
           if (typeof a.id === 'number' && typeof b.id === 'number' && a.id !== b.id) return a.id - b.id
           return String(a.name).localeCompare(String(b.name))
         })
-        const rows = sortedTests
-          .map(
-            (t: any) => `<tr>
-                <td>${escapeHtml(t.name)}</td>
-                ${hasAnyNormal ? '' : '<td></td>'}
-                <td>${escapeHtml(t.result)}</td>
-                ${hasAnyNormal ? '<td>' + escapeHtml(t.normal || '') + '</td>' : ''}
+        const renderRow = (t: any, _isChild = false, parentName?: string, isFirstChild?: boolean) => {
+          const normal = t.normal || t.normal_value || ''
+          if (anyChildren) {
+            // 4 columns: if child row, show parent name only on first child; if standalone test, put name in Test column
+            let parentCell = '<td></td>'
+            let childCell = '<td></td>'
+            if (_isChild) {
+              parentCell = isFirstChild && parentName ? `<td class="title">${escapeHtml(parentName)}</td>` : '<td></td>'
+              childCell = `<td class="title" style="padding-left:8px;">${escapeHtml(t.name)}</td>`
+            } else {
+              // Standalone test (no children) within a table that otherwise has children
+              parentCell = `<td class="title">${escapeHtml(t.name)}</td>`
+              childCell = '<td></td>'
+            }
+            return `<tr>
+                ${parentCell}
+                ${childCell}
+                <td class="result">${escapeHtml(t.result)}</td>
+                <td>${escapeHtml(normal)}</td>
               </tr>`
-          )
+          } else {
+            const nameCell = `<td class="title">${escapeHtml(t.name)}</td>`
+            return `<tr>
+                ${nameCell}
+                ${hasAnyNormal ? '' : '<td></td>'}
+                <td class="result">${escapeHtml(t.result)}</td>
+                ${hasAnyNormal ? '<td>' + escapeHtml(normal) + '</td>' : ''}
+              </tr>`
+          }
+        }
+        const rows = sortedTests
+          .map((t: any) => {
+            const hasChildren = Array.isArray(t.children) && t.children.length > 0
+            if (!hasChildren) return renderRow(t)
+            // Preserve original child order from UI payload when no sort metadata is present.
+            const childrenCopy = t.children.slice()
+            const indexedChildren = childrenCopy.map((c: any, idx: number) => ({ c, idx }))
+            const shouldSortChildren = indexedChildren.some(({ c }) => typeof c.sort_order === 'number')
+            const childrenSorted = shouldSortChildren
+              ? indexedChildren
+                  .slice()
+                  .sort((a: any, b: any) => {
+                    const ao = typeof a.c.sort_order === 'number' ? a.c.sort_order : 999999
+                    const bo = typeof b.c.sort_order === 'number' ? b.c.sort_order : 999999
+                    if (ao !== bo) return ao - bo
+                    // Preserve original order among items without sort_order
+                    return a.idx - b.idx
+                  })
+                  .map(({ c }: any) => c)
+              : childrenCopy
+            const childRows = childrenSorted
+              .map((ch: any, idx: number) => renderRow(ch, true, t.name, idx === 0))
+              .join('')
+            // In 4-column mode, we don't render a separate parent label row; parent name appears only on first child row
+            if (anyChildren) return childRows
+            // In 3-column mode, render a parent label row then children indented
+            const parentLabel = `<tr>
+                <td class="title" style="font-weight:700;">${escapeHtml(t.name)}</td>
+                ${hasAnyNormal ? '' : '<td></td>'}
+                <td class="result"></td>
+                ${hasAnyNormal ? '<td>' + escapeHtml(t.normal || t.normal_value || '') + '</td>' : ''}
+              </tr>`
+            return parentLabel + childRows
+          })
           .join('')
         const html = `<div class="report-group" style="margin-bottom:24px;">
               <div class="group-title">${escapeHtml(cat.category)}</div>
@@ -239,7 +305,7 @@ export const registerAppHandlers = (app: App) => {
   .clinic-header { text-align:center; margin-bottom:24px; position:relative; }
 
   .clinic-header .qr { position:absolute; right:64px; bottom:0px;  align-self:flex-end;  height:56px; width:56px; object-fit:contain; }
-  .clinic-header .phone-label { position:absolute; right:90px; top:4px; font-size:12px; font-family:Cambria,serif; font-weight:600; letter-spacing:0.5px; }
+  .clinic-header .phone-label { position:absolute; right:90px; top:4px; font-size:12px; font-family:Calibri,serif; font-weight:600; letter-spacing:0.5px; }
   .logo-container{
   display:flex;
   align-items:center;
@@ -254,30 +320,35 @@ export const registerAppHandlers = (app: App) => {
       display: block;
 
   }
-  .clinic-header .title {text-decoration:underline; font-size:36px;color:#17365d;font-family:Cambria,serif; font-weight:700; letter-spacing:1px; }
+  .clinic-header .title {text-decoration:underline; font-size:36px;color:#17365d;font-family:Calibri,serif; font-weight:700; letter-spacing:1px; }
   .clinic-header .subtitle1 {color:#17365d; font-size:10px; margin-top:20px; font-family:Arial,sans-serif;}
   .clinic-header .subtitle2, .clinic-header .subtitle3 { font-size:12px; font-family:Arial,sans-serif; line-height:1.2; margin-top:2px; color:#17365d; }
-  .patient-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:4px 12px; font-family:Cambria,serif; font-size:12px; color:#17365d; max-width:80%;margin:0 auto 16px; }
+  .patient-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:4px 12px; font-family:Calibri,serif; font-size:12px; color:#17365d; max-width:80%;margin:0 auto 16px; }
   .patient-grid .cell {text-transform:uppercase; line-height:1.3; }
   .patient-grid .lbl {text-wrap:nowrap; text-transform:uppercase; margin-right:4px; }
   .report-group { page-break-inside: avoid; break-inside: avoid; margin-bottom:26px; }
+  .report-group .result{
+  color:red;
+  font-weight:bold;
+  }
   .page-break { page-break-after: always; break-after: page; }
   .content-wrapper { padding-bottom:70px; }
   .page-top-spacer { height:18px; }
   .footer { position:fixed; bottom:20px; left:24px; right:24px; font-size:12px;width:100%;display:flex;justify-content:flex-end;color:#17365d; }
-  .footer .label {color:#17365d; font-size:14px; font-family:Cambria,serif; margin-right:8px; }
+  .footer .label {color:#17365d; font-size:14px; font-family:Calibri,serif; margin-right:8px; }
   .report-table { border-collapse:collapse; width:100%; max-width:80%; margin:0 auto 8px; table-layout:fixed; }
   .report-table.equal-cols th, .report-table.equal-cols td { width:33.3333%; }
+  .report-table .title{ font-weight:bold;}
   .report-table thead { border:1.5px solid #17365d; }
-  .report-table th, .report-table td {  padding:6px 6px; font-size:13px; font-family:Cambria,serif; text-align:center; vertical-align:middle; }
+  .report-table th, .report-table td {  padding:6px 6px; font-size:13px; font-family:Calibri,serif; text-align:center; vertical-align:middle; }
   .report-table th { padding:2px 6px; }
   .report-table thead th { background:#f0f0f0; font-weight:600; }
-  .group-title { font-family:Cambria,serif; font-size:18px; font-weight:bold; margin:12px auto 6px; text-align:center; }
+  .group-title { font-family:Calibri,serif; font-size:32px; font-weight:bold; margin:12px auto 6px; text-align:center; }
   .lbl-small { font-size:11px; }
   .manual-break-spacer { height:48px; }
   /* Urine report styles */
   .urine-wrapper { page-break-inside:avoid; break-inside:avoid; }
-  .urine-report-page { max-width:80%; margin:0 auto 12px; font-family:Cambria,serif; font-size:12px; line-height:1.5; }
+  .urine-report-page { max-width:80%; margin:0 auto 12px; font-family:Calibri,serif; font-size:12px; line-height:1.5; }
   .urine-title { text-align:center; font-size:24px; font-weight:bold; margin:12px 0 24px; }
   .urine-top-grid {font-family:Calibri,sans-serif; font-size:14px; text-transform:uppercase;  display:grid; grid-template-columns:repeat(4,1fr);  border:1px solid #17365d; border-bottom:none; padding:4px 12px; }
   .urine-top-row { display:flex; flex-wrap:wrap; gap:8px 24px; margin:2px 0; }
@@ -368,6 +439,44 @@ export const registerAppHandlers = (app: App) => {
       timestamp: r.timestamp,
     })) as any
   })
+  // Nested variant per single category
+  handle('tests-by-category-nested', (category: string) => {
+    const db = getDb()
+    logEvent({ action: 'TESTS_BY_CATEGORY_NESTED', payload: { category } })
+    const rows = db
+      .prepare(
+        'SELECT id, category, name, result, normal_value, required, sort_order, parent_id, timestamp FROM test WHERE category = ? ORDER BY COALESCE(sort_order, 999999), COALESCE(parent_id, 0), id'
+      )
+      .all(category) as any[]
+    const byId: Record<number, any> = {}
+    const list = rows.map((r) => ({
+      id: r.id,
+      category: r.category,
+      name: r.name,
+      result: r.result,
+      normal_value: r.normal_value,
+      required: !!r.required,
+      sort_order: typeof r.sort_order === 'number' ? r.sort_order : null,
+      parent_id: typeof r.parent_id === 'number' ? r.parent_id : null,
+      timestamp: r.timestamp,
+    }))
+    list.forEach((t) => (byId[t.id] = { ...t }))
+    const roots: any[] = []
+    list.forEach((t) => {
+      if (t.parent_id) {
+        const p = byId[t.parent_id]
+        if (p) {
+          p.children = p.children || []
+          p.children.push({ ...t })
+        } else {
+          roots.push(t)
+        }
+      } else {
+        roots.push(byId[t.id])
+      }
+    })
+    return { category, tests: roots }
+  })
   handle('save-test-record', (payload: any) => {
     const db = getDb()
     // Ensure migration ran (defensive): add column if missing before insert
@@ -416,17 +525,38 @@ export const registerAppHandlers = (app: App) => {
   handle('print-report', ({ report }: { report: any }) => {
     logEvent({ action: 'PRINT_REPORT_ATTEMPT' })
     const promise = (async () => {
+      // First: create an offscreen window to render the report
       const win = new BrowserWindow({
         show: false,
         webPreferences: { sandbox: false },
       })
       const html = await buildReportHtml(report)
       await win.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(html))
+      // Optionally force a layout flush
+      try {
+        await new Promise((r) => setTimeout(r, 50))
+      } catch {
+        /* ignore delay errors */
+      }
+      // Generate a high-scale PDF (scaleFactor=2) for crisper print fonts/images (if driver uses rasterization)
+      try {
+        await win.webContents.printToPDF({
+          printBackground: true,
+          landscape: false,
+          margins: { marginType: 'default' },
+          scaleFactor: 2,
+          pageSize: 'A4',
+          preferCSSPageSize: true,
+        } as any)
+      } catch (e) {
+        // If PDF generation fails, continue to attempt normal print
+        logEvent({ action: 'PRINT_REPORT_PDF_SCALE_FALLBACK', level: 'WARN', message: String(e) })
+      }
       return await new Promise<{ printed: boolean; error?: string }>((resolve) => {
         win.webContents.print(
           {
             silent: false,
-            printBackground: false,
+            printBackground: true,
             landscape: false,
           },
           (success, failureReason) => {
@@ -444,6 +574,49 @@ export const registerAppHandlers = (app: App) => {
           }
         )
       })
+    })()
+    return promise as any
+  })
+
+  // Generate a PDF (for preview / higher quality printing) with optional scale factor
+  handle('print-to-pdf', ({ report, scale }: { report: any; scale?: number }) => {
+    logEvent({ action: 'PRINT_TO_PDF_ATTEMPT', payload: { scale } })
+    const promise = (async () => {
+      const win = new BrowserWindow({
+        show: false,
+        webPreferences: { sandbox: false },
+      })
+      const html = await buildReportHtml(report)
+      await win.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(html))
+      const clampedScale = !scale || Number.isNaN(scale) ? 1 : Math.min(2, Math.max(0.5, scale))
+      try {
+        const pdfBuffer = await win.webContents.printToPDF({
+          printBackground: true,
+          landscape: false,
+          margins: { marginType: 'default' },
+          scaleFactor: clampedScale, // Chromium allows ~0.1 - 2.0; Electron docs recommend 0.5 - 2
+          pageSize: 'A4',
+          preferCSSPageSize: true,
+        } as any)
+        const pdfPath = path.join(app.getPath('temp'), `report-preview-${Date.now()}.pdf`)
+        fs.writeFileSync(pdfPath, pdfBuffer)
+        logEvent({ action: 'PRINT_TO_PDF_SUCCESS', payload: { pdfPath, scale: clampedScale } })
+        try {
+          win.destroy()
+        } catch {
+          /* ignore */
+        }
+        const dataUrl = 'data:application/pdf;base64,' + pdfBuffer.toString('base64')
+        return { filePath: pdfPath, dataUrl }
+      } catch (err: any) {
+        logEvent({ action: 'PRINT_TO_PDF_FAIL', level: 'ERROR', message: err?.message || String(err) })
+        try {
+          win.destroy()
+        } catch {
+          /* ignore */
+        }
+        throw new Error('Failed to generate PDF: ' + (err?.message || err))
+      }
     })()
     return promise as any
   })
@@ -564,23 +737,45 @@ export const registerAppHandlers = (app: App) => {
     const db = getDb()
     const rows = db
       .prepare(
-        'SELECT id, category, name, result, normal_value, required, sort_order, timestamp FROM test ORDER BY category, COALESCE(sort_order, 999999), id'
+        'SELECT id, category, name, result, normal_value, required, sort_order, parent_id, timestamp FROM test ORDER BY category, COALESCE(sort_order, 999999), COALESCE(parent_id, 0), id'
       )
       .all() as any[]
     const grouped: Record<string, any[]> = {}
     for (const r of rows) {
       grouped[r.category] = grouped[r.category] || []
-      grouped[r.category].push({
+      const item = {
         id: r.id,
         name: r.name,
         result: r.result,
         normal_value: r.normal_value,
         required: !!r.required,
         sort_order: typeof r.sort_order === 'number' ? r.sort_order : null,
+        parent_id: typeof r.parent_id === 'number' ? r.parent_id : null,
         timestamp: r.timestamp,
-      })
+      }
+      grouped[r.category].push(item)
     }
-    return Object.keys(grouped).map((cat) => ({ category: cat, tests: grouped[cat] }))
+    // Nest children under parents
+    return Object.keys(grouped).map((cat) => {
+      const list = grouped[cat]
+      const byId: Record<number, any> = {}
+      list.forEach((t) => (byId[t.id] = { ...t }))
+      const roots: any[] = []
+      list.forEach((t) => {
+        if (t.parent_id) {
+          const p = byId[t.parent_id]
+          if (p) {
+            p.children = p.children || []
+            p.children.push({ ...t })
+          } else {
+            roots.push(t) // orphan safety
+          }
+        } else {
+          roots.push(byId[t.id])
+        }
+      })
+      return { category: cat, tests: roots }
+    })
   })
   handle('add-test-category', ({ category }: { category: string }) => {
     logEvent({ action: 'ADD_TEST_CATEGORY', payload: { category } })
@@ -600,15 +795,50 @@ export const registerAppHandlers = (app: App) => {
     ({ category, name, normal_value }: { category: string; name: string; normal_value?: string | null }) => {
       logEvent({ action: 'ADD_TEST', payload: { category, name } })
       const db = getDb()
+      // Determine next sort_order within the category for root tests
+      const maxRow = db
+        .prepare('SELECT COALESCE(MAX(sort_order), -1) AS maxo FROM test WHERE category = ? AND parent_id IS NULL')
+        .get(category) as { maxo: number } | undefined
+      const nextOrder = (maxRow?.maxo ?? -1) + 1
       const stmt = db.prepare(
-        'INSERT OR IGNORE INTO test (category, name, result, normal_value, required) VALUES (?, ?, ?, ?, 0)'
+        'INSERT OR IGNORE INTO test (category, name, result, normal_value, required, parent_id, sort_order) VALUES (?, ?, ?, ?, 0, NULL, ?)'
       )
-      const info = stmt.run(category, name, '', normal_value || '')
+      const info = stmt.run(category, name, '', normal_value || '', nextOrder)
       const idRow = db.prepare('SELECT id, required FROM test WHERE category = ? AND name = ?').get(category, name) as {
         id: number
         required: number
       }
       return { id: idRow?.id || 0, inserted: info.changes === 1, required: !!idRow?.required }
+    }
+  )
+  handle(
+    'add-child-test',
+    ({
+      category,
+      parent_id,
+      name,
+      normal_value,
+    }: {
+      category: string
+      parent_id: number
+      name: string
+      normal_value?: string | null
+    }) => {
+      logEvent({ action: 'ADD_CHILD_TEST', payload: { category, parent_id, name } })
+      const db = getDb()
+      // Determine next sort_order for this parent's children within the category
+      const maxRow = db
+        .prepare('SELECT COALESCE(MAX(sort_order), -1) AS maxo FROM test WHERE category = ? AND parent_id = ?')
+        .get(category, parent_id) as { maxo: number } | undefined
+      const nextOrder = (maxRow?.maxo ?? -1) + 1
+      const stmt = db.prepare(
+        'INSERT OR IGNORE INTO test (category, name, result, normal_value, required, parent_id, sort_order) VALUES (?, ?, ?, ?, 0, ?, ?)'
+      )
+      const info = stmt.run(category, name, '', normal_value || '', parent_id, nextOrder)
+      const idRow = db
+        .prepare('SELECT id FROM test WHERE category = ? AND name = ? AND parent_id = ?')
+        .get(category, name, parent_id) as { id: number } | undefined
+      return { id: idRow?.id || 0, inserted: info.changes === 1 }
     }
   )
   handle('update-test-normal', ({ id, normal_value }: { id: number; normal_value?: string | null }) => {
@@ -639,7 +869,7 @@ export const registerAppHandlers = (app: App) => {
     const db = getDb()
     const rows = db
       .prepare(
-        'SELECT id, category, name, normal_value, result, required, sort_order FROM test WHERE name != ? ORDER BY category, COALESCE(sort_order, 999999), id'
+        'SELECT id, category, name, normal_value, result, required, sort_order, parent_id FROM test WHERE name != ? ORDER BY category, COALESCE(sort_order, 999999), COALESCE(parent_id, 0), id'
       )
       .all('_placeholder_') as any[]
     return rows.map((r) => ({
@@ -650,16 +880,17 @@ export const registerAppHandlers = (app: App) => {
       result: r.result || '',
       required: !!r.required,
       sort_order: typeof r.sort_order === 'number' ? r.sort_order : undefined,
+      parent_id: typeof r.parent_id === 'number' ? r.parent_id : undefined,
     }))
   })
   handle('import-tests', (payload: any[]) => {
     logEvent({ action: 'IMPORT_TESTS', payload: { count: payload.length } })
     const db = getDb()
     const insertWithId = db.prepare(
-      'INSERT OR IGNORE INTO test (id, category, name, result, normal_value, required, sort_order) VALUES (@id, @category, @name, @result, @normal_value, @required, @sort_order)'
+      'INSERT OR IGNORE INTO test (id, category, name, result, normal_value, required, sort_order, parent_id) VALUES (@id, @category, @name, @result, @normal_value, @required, @sort_order, @parent_id)'
     )
     const insertNoId = db.prepare(
-      'INSERT OR IGNORE INTO test (category, name, result, normal_value, required, sort_order) VALUES (@category, @name, @result, @normal_value, @required, @sort_order)'
+      'INSERT OR IGNORE INTO test (category, name, result, normal_value, required, sort_order, parent_id) VALUES (@category, @name, @result, @normal_value, @required, @sort_order, @parent_id)'
     )
     let inserted = 0
     for (const raw of payload) {
@@ -670,6 +901,7 @@ export const registerAppHandlers = (app: App) => {
         normal_value: (raw.normal_value || '').toString().trim(),
         required: raw.required ? 1 : 0,
         sort_order: typeof (raw as any).sort_order === 'number' ? (raw as any).sort_order : null,
+        parent_id: typeof (raw as any).parent_id === 'number' ? (raw as any).parent_id : null,
       }
       if (!base.category || !base.name) continue
       let info: any

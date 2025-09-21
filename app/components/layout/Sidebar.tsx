@@ -1,6 +1,7 @@
 import React from 'react'
-import { ClipboardPlus } from 'lucide-react'
+import { ClipboardPlus, Power } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { useAuth } from '@/app/components/auth/AuthContext'
 
 export interface SidebarProps {
   active: string
@@ -8,6 +9,7 @@ export interface SidebarProps {
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({ active, onSelect }) => {
+  const { lock } = useAuth()
   const items = [
     { key: 'patients', label: 'Generate Report', icon: ClipboardPlus }, // keep label as requested
     { key: 'records', label: 'Records', icon: ClipboardPlus },
@@ -37,6 +39,14 @@ export const Sidebar: React.FC<SidebarProps> = ({ active, onSelect }) => {
           )
         })}
       </ul>
+      <div className="era-sidebar-spacer" />
+      <div className="era-sidebar-footer">
+        <button type="button" className="era-sidebar-btn logout-btn" onClick={() => lock()} title="Sign Out">
+          {/* <div className="icon logout-icon">BOB</div> */}
+          <Power className="icon" />
+          <span className="label">Sign Out</span>
+        </button>
+      </div>
     </nav>
   )
 }
