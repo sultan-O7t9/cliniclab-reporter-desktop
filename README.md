@@ -1,10 +1,5 @@
 # ClinicLab Reporter
 
-<br />
-<p align="center">
-    <img src="resources/build/icon.svg" width="64" />
-</p>
-
 A modern Electron application template with React, Vite, TypeScript, and TailwindCSS. This project provides a solid foundation for developing cross-platform desktop applications.
 
 <br />
@@ -30,29 +25,31 @@ A modern Electron application template with React, Vite, TypeScript, and Tailwin
 
 ## Stack
 
-🔹 [Electron](https://www.electronjs.org/) - Cross-platform desktop application framework.<br />
-🔹 [React](https://react.dev/) - Component-based UI library.<br />
-🔹 [TypeScript](https://www.typescriptlang.org/) - Type-safe JavaScript.<br />
-🔹 [Shadcn UI](https://ui.shadcn.com/) - Beautiful and accessible component library.<br />
-🔹 [TailwindCSS](https://tailwindcss.com/) - Utility-first CSS framework.<br />
-🔹 [Electron Vite](https://electron-vite.org/) - Lightning-fast build tool based on [Vite](https://vite.dev/) for fastest hot-reload.<br />
-🔹 [Electron Builder](https://www.electron.build/index.html) - Configured for packaging applications.<br />
+🔹 **[Electron](https://www.electronjs.org)** - Cross-platform desktop application framework.<br />
+🔹 **[React](https://react.dev)** - The library for web and native user interfaces.<br />
+🔹 **[TypeScript](https://www.typescriptlang.org)** - Type-safe JavaScript.<br />
+🔹 **[Shadcn UI](https://ui.shadcn.com)** - Beautiful and accessible component library.<br />
+🔹 **[TailwindCSS](https://tailwindcss.com)** - Utility-first CSS framework.<br />
+🔹 **[Electron Vite](https://electron-vite.org)** - Lightning-fast build tool based on **Vite** for fastest hot-reload.<br />
+🔹 **[Electron Builder](https://www.electron.build/index.html)** - Configured for packaging applications.<br />
 
 <br />
 
 ## In-Built Features
 
-🔹 [Conveyor](lib/conveyor/README.md) - Type-safe inter-process communication with Zod validation.<br />
-🔹 Custom Window Titlebar & Menus - Style the window titlebar and menus as you want.<br />
-🔹 Clean Project Structure - Separation of main and renderer processes.<br />
-🔹 Resources Protocol - Access resources folder via `res://` protocol.<br />
-🔹 Import path aliases – Keep your imports organized and clean.<br />
-🔹 Theme Switcher - Built-in theme switching for dark and light mode.<br />
-🔹 Error Boundary - Built-in React error boundary with detailed error reporting.<br />
-🔹 Welcome Kit - Interactive showcase with Framer Motion animations.<br />
-🔹 Code Formatting - Prettier and ESLint pre-configured for code quality.<br />
-🔹 Hot Reload - Lightning-fast development with Vite's HMR.<br />
-🔹 VS Code Debugging - Pre-configured launch configurations for debugging main and renderer processes.<br />
+| Feature                     | Description                                                                    |
+| --------------------------- | ------------------------------------------------------------------------------ |
+| **Conveyor**                | Type-safe inter-process communication with Zod validation                      |
+| **Custom Titlebar & Menus** | Style the window titlebar and menus as you want                                |
+| **Clean Project Structure** | Separation of main and renderer processes                                      |
+| **Resources Protocol**      | Access local file resources via `res://` protocol                              |
+| **Import Path Aliases**     | Keep your imports organized and clean                                          |
+| **Theme Switcher**          | Built-in theme switching for dark and light mode                               |
+| **Error Boundary**          | Built-in React error boundary with detailed error reporting                    |
+| **Welcome Kit**             | Interactive showcase with Framer Motion animations                             |
+| **Code Formatting**         | Prettier and ESLint pre-configured for code quality                            |
+| **Hot Reload**              | Lightning-fast development with Vite's HMR                                     |
+| **VS Code Debugging**       | Pre-configured launch configurations for debugging main and renderer processes |
 
 <br />
 
@@ -85,63 +82,37 @@ This will start Electron with hot-reload enabled so you can see changes in real 
 
 <br />
 
-## Building for Production
+## Conveyor - Inter-Process Communication
 
-Build the application for your platform:
+**Conveyor** is a type-safe IPC system that enables secure communication between your React frontend and Electron's main process. It uses Zod schemas for runtime validation and provides full TypeScript support.
 
-```bash
-# For Windows
-npm run build:win
-
-# For macOS
-npm run build:mac
-
-# For Linux
-npm run build:linux
-
-# Unpacked for all platforms
-npm run build:unpack
-```
-
-Distribution files will be located in the `dist` directory.
+🔹 **Type-safe** - Full TypeScript support with compile-time and runtime validation<br />
+🔹 **Secure** - Validates all data using Zod schemas<br />
+🔹 **Modular** - Clean API structure with organized handlers<br />
+🔹 **Simple** - Easy-to-use React hooks and global APIs<br />
 
 <br />
 
-## Conveyor - Inter-Process Communication
-
-This project implements **Conveyor**, a **type-safe IPC (Inter-Process Communication)** system using Zod schemas for runtime validation. Conveyor provides a clean, modular API interface between the renderer and main processes with full TypeScript support.
-
-📖 **For detailed Conveyor documentation and advanced usage instructions, see its [README](lib/conveyor/README.md)**
-
 ### Quick Start
 
+Use the `useConveyor` hook in your React components:
+
 ```tsx
-// In your React component
-import { useEffect, useState } from 'react'
 import { useConveyor } from '@/app/hooks/use-conveyor'
 
-function AppInfo() {
-  const [version, setVersion] = useState<string>('')
-  const conveyor = useConveyor()
+function MyComponent() {
+  const { version } = useConveyor('app')
+  const { windowMinimize } = useConveyor('window')
 
-  useEffect(() => {
-    // Get app version from main process
-    conveyor.app.version().then(setVersion)
-  }, [])
-
-  const handleMinimize = () => {
-    conveyor.window.windowMinimize()
-  }
-
-  const handleOpenUrl = (url: string) => {
-    conveyor.window.webOpenUrl(url)
+  const handleGetVersion = async () => {
+    console.log('App version:', await version())
+    console.log('App version:', await window.conveyor.app.version()) // OR
   }
 
   return (
     <div>
-      <p>App Version: {version}</p>
-      <button onClick={handleMinimize}>Minimize</button>
-      <button onClick={() => handleOpenUrl('https://github.com')}>Open GitHub</button>
+      <button onClick={handleGetVersion}>Get Version</button>
+      <button onClick={windowMinimize}>Minimize Window</button>
     </div>
   )
 }
@@ -149,41 +120,58 @@ function AppInfo() {
 
 ### Available APIs
 
-The IPC system exposes several APIs through:
+Conveyor provides two ways to access IPC methods:
 
-- global window object `window.conveyor`
-- react hook `useConveyor()`
+```tsx
+// Method 1: React Hook (Recommended)
+const { version } = useConveyor('app')
+await version()
 
-### Adding New IPC Channels
+// Method 2: React Hook Global Conveyor
+const conveyor = useConveyor()
+await conveyor.app.version()
 
-To add a new IPC channel, follow these steps:
+// Method 3: Global Window Object
+await window.conveyor.app.version()
+```
 
-#### 1. Define the Schema
+### Built-in APIs
 
-Create or update a schema file in `lib/conveyor/schemas/`:
+| API      | Description                | Example                            |
+| -------- | -------------------------- | ---------------------------------- |
+| `app`    | App specfiic operations    | `conveyor.app.version()`           |
+| `window` | Window specific operations | `conveyor.window.windowMinimize()` |
+
+<br />
+
+### Creating Custom APIs
+
+Follow these 4 simple steps to add your own IPC methods:
+
+#### Step 1: Define Schema
+
+Create a schema in `lib/conveyor/schemas/app-schema.ts`:
 
 ```ts
-// lib/ipc/schemas/app-schema.ts
 import { z } from 'zod'
 
 export const appIpcSchema = {
-  version: {
+  // Simple method with no parameters
+  'get-app-info': {
     args: z.tuple([]),
-    return: z.string(),
-  },
-  'get-user-data': {
-    args: z.tuple([z.string()]), // userId parameter
     return: z.object({
-      id: z.string(),
       name: z.string(),
-      email: z.string().email(),
+      version: z.string(),
+      platform: z.string(),
     }),
   },
-  'save-data': {
+
+  // Method with parameters
+  'save-user-preference': {
     args: z.tuple([
       z.object({
         key: z.string(),
-        value: z.unknown(),
+        value: z.string(),
       }),
     ]),
     return: z.boolean(),
@@ -191,84 +179,110 @@ export const appIpcSchema = {
 } as const
 ```
 
-#### 2. Add API Methods
+#### Step 2: Add API Method
 
-Update the corresponding API class in `lib/conveyor/api/`:
+Update `lib/conveyor/api/app-api.ts`:
 
 ```ts
-// lib/conveyor/api/app-api.ts
-import { ConveyorApi } from '@/lib/preload/shared'
-
 export class AppApi extends ConveyorApi {
-  version = () => this.invoke('version')
-  getUserData = (userId: string) => this.invoke('get-user-data', userId)
-  saveData = (key: string, value: unknown) => this.invoke('save-data', { key, value })
+  getAppInfo = () => this.invoke('get-app-info')
+  saveUserPreference = (key: string, value: string) => this.invoke('save-user-preference', { key, value })
 }
 ```
 
-#### 3. Implement the Handler
+#### Step 3: Implement Handler
 
-Add the handler in `lib/conveyor/handlers/`:
+Add handler in `lib/conveyor/handlers/app-handler.ts`:
 
 ```ts
-// lib/conveyor/handlers/app-handler.ts
 import { handle } from '@/lib/main/shared'
 import { app } from 'electron'
 
 export const registerAppHandlers = () => {
-  handle('version', () => app.getVersion())
+  handle('get-app-info', () => ({
+    name: app.getName(),
+    version: app.getVersion(),
+    platform: process.platform,
+  }))
 
-  handle('get-user-data', async (userId: string) => {
-    // Your logic here
-    return {
-      id: userId,
-      name: 'John Doe',
-      email: 'john@example.com',
-    }
-  })
-
-  handle('save-data', async ({ key, value }) => {
-    // Your logic here
-    console.log(`Saving ${key}:`, value)
+  handle('save-user-preference', async ({ key, value }) => {
+    // Save to file, database, etc.
+    console.log(`Saving ${key}: ${value}`)
     return true
   })
 }
 ```
 
-#### 4. Register the Handler
+#### Step 4: Register Handler
 
-Update `lib/main/app.ts` to register your handlers:
+In `lib/main/app.ts`:
 
 ```ts
 import { registerAppHandlers } from '@/lib/conveyor/handlers/app-handler'
 
-// In your app initialization
+// During app initialization
 registerAppHandlers()
 ```
 
-### Type Safety
-
-The IPC system provides full TypeScript support with runtime validation:
+### Usage in Components
 
 ```tsx
-// TypeScript will enforce correct types
-const userData = await conveyor.app.getUserData('123') // ✅ Correct
-const userData = await conveyor.app.getUserData(123) // ❌ Type error
+function SettingsComponent() {
+  const conveyor = useConveyor()
+  const [appInfo, setAppInfo] = useState(null)
 
-// Runtime validation ensures data integrity
-const result = await conveyor.app.saveData('config', { theme: 'dark' })
+  useEffect(() => {
+    // Get app information
+    conveyor.app.getAppInfo().then(setAppInfo)
+  }, [])
+
+  const saveTheme = (theme: string) => {
+    conveyor.app.saveUserPreference('theme', theme)
+  }
+
+  return (
+    <div>
+      <h2>App Info</h2>
+      {appInfo && (
+        <p>
+          {appInfo.name} v{appInfo.version} on {appInfo.platform}
+        </p>
+      )}
+
+      <button onClick={() => saveTheme('dark')}>Set Dark Theme</button>
+    </div>
+  )
+}
 ```
 
 ### Error Handling
 
 ```tsx
-try {
-  const data = await conveyor.app.getUserData('invalid-id')
-} catch (error) {
-  console.error('IPC call failed:', error)
-  // Handle validation errors, network issues, etc.
+const handleApiCall = async () => {
+  try {
+    const result = await conveyor.app.getAppInfo()
+    console.log('Success:', result)
+  } catch (error) {
+    console.error('API call failed:', error)
+    // Handle validation errors, network issues, etc.
+  }
 }
 ```
+
+### Type Safety Benefits
+
+```tsx
+// ✅ TypeScript enforces correct types
+const info = await conveyor.app.getAppInfo() // Returns { name: string, version: string, platform: string }
+
+// ❌ TypeScript error - wrong parameter type
+const result = await conveyor.app.saveUserPreference(123, 'value') // Error: Expected string, got number
+
+// ✅ Runtime validation ensures data integrity
+const valid = await conveyor.app.saveUserPreference('theme', 'dark') // Validates at runtime
+```
+
+📖 **For advanced usage and detailed documentation, see [Conveyor README](lib/conveyor/README.md)**
 
 <br />
 
@@ -421,3 +435,25 @@ Configured aliases by default, customise as you want:
 - `@/` → `app/` (application code - renderer process)
 - `@/lib/` → `lib/` (shared library code containing conveyor, main, preload, etc.)
 - `@/resources/` → `resources/` (build resources for the application)
+
+<br />
+
+## Building for Production
+
+Build the application for your platform:
+
+```bash
+# For Windows
+npm run build:win
+
+# For macOS
+npm run build:mac
+
+# For Linux
+npm run build:linux
+
+# Unpacked for all platforms
+npm run build:unpack
+```
+
+Distribution files will be located in the `dist` directory.
