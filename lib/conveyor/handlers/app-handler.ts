@@ -1,6 +1,7 @@
 import { type App, BrowserWindow } from 'electron'
 import { handle } from '@/lib/main/shared'
 import { getDb, logEvent, resetDatabase } from '@/lib/main/database'
+import { applyTestsUpdate2025, needsTestsUpdate2025, markTestsUpdatePrompted2025 } from '@/lib/main/database'
 import { reseedTests, DEFAULT_TESTS } from '@/lib/main/database'
 import fs from 'fs'
 import path from 'path'
@@ -15,6 +16,23 @@ const escapeHtml = (v: any) =>
     .replace(/'/g, '&#39;')
 
 export const registerAppHandlers = (app: App) => {
+  // Tests update 2025: helper endpoints for renderer confirmation flow
+  handle('needs-tests-update-2025' as any, () => {
+    const needs = needsTestsUpdate2025()
+    return { needs }
+  })
+  handle('mark-tests-update-prompted-2025' as any, () => {
+    try {
+      markTestsUpdatePrompted2025()
+      return { ok: true }
+    } catch {
+      return { ok: false }
+    }
+  })
+  handle('apply-tests-update-2025' as any, () => {
+    const res = applyTestsUpdate2025()
+    return res
+  })
   const resolveResourcesDir = () => {
     return app.isPackaged ? path.join(process.resourcesPath, 'resources') : path.join(app.getAppPath(), 'resources')
   }
@@ -180,8 +198,181 @@ export const registerAppHandlers = (app: App) => {
           if (typeof a.id === 'number' && typeof b.id === 'number' && a.id !== b.id) return a.id - b.id
           return String(a.name).localeCompare(String(b.name))
         })
+        // Helpers to parse/format/evaluate normal specs for coloring
+        type Range = { min?: number; max?: number }
+        type NormalSpec =
+          | { type: 'none' }
+          | { type: 'options'; options: Array<string | { label: string; color?: string }> }
+          | { type: 'range'; range: Range }
+          | { type: 'sexed-range'; male?: Range; female?: Range }
+
+        const trimLower = (s: string) => s.trim().toLowerCase()
+        const parseNumber = (s: string): number | undefined => {
+          const m = s.replace(/,/g, '').match(/[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?/)
+          if (!m) return undefined
+          const n = parseFloat(m[0])
+          return Number.isFinite(n) ? n : undefined
+        }
+        const parseRange = (raw: string): Range | null => {
+          const s = raw.replace(/\s+/g, ' ').trim()
+          if (!s) return null
+          // >=x, <=y, >x, <y
+          let m = s.match(/^>=\s*([\d.,]+)$/i)
+          if (m) return { min: parseNumber(m[1]) }
+          m = s.match(/^>\s*([\d.,]+)$/i)
+          if (m) return { min: parseNumber(m[1]) }
+          m = s.match(/^<=\s*([\d.,]+)$/i)
+          if (m) return { max: parseNumber(m[1]) }
+          m = s.match(/^<\s*([\d.,]+)$/i)
+          if (m) return { max: parseNumber(m[1]) }
+          // a-b or a to b
+          m = s.match(/^([\d.,]+)\s*(?:-|–|—|to)\s*([\d.,]+)$/i)
+          if (m) return { min: parseNumber(m[1]), max: parseNumber(m[2]) }
+          // a+ (min only)
+          m = s.match(/^([\d.,]+)\s*\+$/)
+          if (m) return { min: parseNumber(m[1]) }
+          // single number (treat as exact or lower bound)
+          const n = parseNumber(s)
+          if (n !== undefined) return { min: n, max: n }
+          return null
+        }
+        const parseOptions = (raw: string): Array<string | { label: string; color?: string }> | null => {
+          const s = (raw || '').trim()
+          if (!s) return null
+          try {
+            const arr = JSON.parse(s)
+            if (Array.isArray(arr)) {
+              if (arr.every((x) => typeof x === 'string')) return arr as string[]
+              if (arr.every((x) => x && typeof x === 'object' && typeof x.label === 'string')) {
+                return arr as Array<{ label: string; color?: string }>
+              }
+            }
+          } catch {
+            /* not json */
+          }
+          if (/[|,/]/.test(s)) {
+            const parts = s
+              .split(/[|,/]/)
+              .map((p) => p.trim())
+              .filter(Boolean)
+            if (parts.length >= 2) return parts
+          }
+          // Common pair
+          if (/\bpositive\b|\bnegative\b/i.test(s)) {
+            return ['POSITIVE', 'NEGATIVE']
+          }
+          return null
+        }
+        const parseSexedRange = (raw: string): { male?: Range; female?: Range } | null => {
+          const s = (raw || '').replace(/;/g, ',')
+          const parts = s
+            .split(',')
+            .map((p) => p.trim())
+            .filter(Boolean)
+          if (!parts.length) return null
+          let male: Range | undefined
+          let female: Range | undefined
+          for (const p of parts) {
+            const pm = p.match(/^(m|male)\s*[:=]\s*(.+)$/i)
+            const pf = p.match(/^(f|female)\s*[:=]\s*(.+)$/i)
+            if (pm) male = parseRange(pm[2]) || male
+            else if (pf) female = parseRange(pf[2]) || female
+          }
+          if (!male && !female) return null
+          return { male, female }
+        }
+        const parseNormalSpec = (raw: string, _fallback?: string): NormalSpec => {
+          const s = (raw || '').trim()
+          if (!s) return { type: 'none' }
+          if (s.startsWith('{')) {
+            try {
+              const o = JSON.parse(s)
+              if (o && typeof o === 'object' && typeof o.type === 'string') {
+                if (o.type === 'options' && Array.isArray(o.options)) {
+                  return { type: 'options', options: o.options }
+                }
+                if (o.type === 'range' && o.range && typeof o.range === 'object') {
+                  return { type: 'range', range: { min: o.range.min, max: o.range.max } }
+                }
+                if (o.type === 'sexed-range') {
+                  const male: Range | undefined = o.male ? { min: o.male.min, max: o.male.max } : undefined
+                  const female: Range | undefined = o.female ? { min: o.female.min, max: o.female.max } : undefined
+                  return { type: 'sexed-range', male, female }
+                }
+              }
+            } catch {
+              /* fallthrough */
+            }
+          }
+          const sexed = parseSexedRange(s)
+          if (sexed) return { type: 'sexed-range', ...sexed }
+          const rng = parseRange(s)
+          if (rng) return { type: 'range', range: rng }
+          const opts = parseOptions(s)
+          if (opts) return { type: 'options', options: opts }
+          return { type: 'none' }
+        }
+        const formatNormalDisplay = (raw: string): string => {
+          if (!raw) return ''
+          try {
+            const arr = JSON.parse(raw)
+            if (Array.isArray(arr)) return arr.join(' / ')
+          } catch {
+            /* not json*/
+          }
+          // Normalize sex separators
+          if (/\b(m|male)\s*[:=]/i.test(raw) || /\b(f|female)\s*[:=]/i.test(raw)) {
+            return raw.replace(/\s*,\s*/g, '; ').replace(/\s*;\s*/g, '; ')
+          }
+          return raw
+        }
+        const colorFor = (
+          resultRaw: string,
+          normalRaw: string,
+          normalSpecRaw?: string
+        ): { cls: string; style?: string } => {
+          const res = (resultRaw || '').toString().trim()
+          if (!res) return { cls: '', style: undefined }
+          const spec = parseNormalSpec(normalSpecRaw || normalRaw, normalRaw)
+          const lowerRes = res.toLowerCase()
+          if (spec.type === 'options') {
+            const normalized = spec.options.map((o) => (typeof o === 'string' ? { label: o } : o))
+            // Only apply color when the option explicitly defines a color; do not color plain text options
+            const match = normalized.find((o) => trimLower(o.label) === lowerRes)
+            if (match && match.color) return { cls: '', style: `color:${match.color}` }
+            return { cls: '' }
+          }
+          const pickRange = (): Range | undefined => {
+            if (spec.type === 'range') return spec.range
+            if (spec.type === 'sexed-range') {
+              const sex = (patientSex || '').toString().trim().toLowerCase()
+              if (sex.startsWith('m')) return spec.male || spec.female
+              if (sex.startsWith('f')) return spec.female || spec.male
+              return spec.male || spec.female
+            }
+            return undefined
+          }
+          const rng = pickRange()
+          if (rng) {
+            const n = parseNumber(res)
+            if (n === undefined) return { cls: '' }
+            const hasMin = typeof rng.min === 'number'
+            const hasMax = typeof rng.max === 'number'
+            if (hasMin && n < (rng.min as number)) {
+              if (hasMax && (rng.max as number) >= 9999) return { cls: 'result-red' }
+              else return { cls: 'result-yellow' }
+            }
+
+            if (hasMax && n > (rng.max as number)) return { cls: 'result-red' }
+            return { cls: 'result-green' }
+          }
+          return { cls: '' }
+        }
         const renderRow = (t: any, _isChild = false, parentName?: string, isFirstChild?: boolean) => {
-          const normal = t.normal || t.normal_value || ''
+          const normalRaw = t.normal || t.normal_value || ''
+          const normalSpecRaw = t.normal_spec || ''
+          const normal = formatNormalDisplay(normalRaw)
+          const colorInfo = colorFor(t.result, normalRaw, normalSpecRaw)
           if (anyChildren) {
             // 4 columns: if child row, show parent name only on first child; if standalone test, put name in Test column
             let parentCell = '<td></td>'
@@ -197,7 +388,7 @@ export const registerAppHandlers = (app: App) => {
             return `<tr>
                 ${parentCell}
                 ${childCell}
-                <td class="result">${escapeHtml(t.result)}</td>
+                <td class="result ${colorInfo.cls}"${colorInfo.style ? ` style="${escapeHtml(colorInfo.style)}"` : ''}>${escapeHtml(t.result)}</td>
                 <td>${escapeHtml(normal)}</td>
               </tr>`
           } else {
@@ -205,7 +396,7 @@ export const registerAppHandlers = (app: App) => {
             return `<tr>
                 ${nameCell}
                 ${hasAnyNormal ? '' : '<td></td>'}
-                <td class="result">${escapeHtml(t.result)}</td>
+                <td class="result ${colorInfo.cls}"${colorInfo.style ? ` style="${escapeHtml(colorInfo.style)}"` : ''}>${escapeHtml(t.result)}</td>
                 ${hasAnyNormal ? '<td>' + escapeHtml(normal) + '</td>' : ''}
               </tr>`
           }
@@ -328,9 +519,12 @@ export const registerAppHandlers = (app: App) => {
   .patient-grid .lbl {text-wrap:nowrap; text-transform:uppercase; margin-right:4px; }
   .report-group { page-break-inside: avoid; break-inside: avoid; margin-bottom:26px; }
   .report-group .result{
-  color:red;
   font-weight:bold;
   }
+  /* Dynamic result coloring overrides */
+  .report-table td.result.result-green { color:#00FF00 !important; font-weight:700; }
+  .report-table td.result.result-yellow { color:#fec200 !important; font-weight:700; }
+  .report-table td.result.result-red { color:#FF0000 !important; font-weight:700; }
   .page-break { page-break-after: always; break-after: page; }
   .content-wrapper { padding-bottom:70px; }
   .page-top-spacer { height:18px; }
@@ -397,7 +591,7 @@ export const registerAppHandlers = (app: App) => {
     <div class="cell"><span class="lbl">AGE / SEX</span></div>
     <div class="cell"><b class="lbl lbl-small">${escapeHtml(patientAge.toString())}/${escapeHtml((patientSex || '').toString().toUpperCase())}</b></div>
     <div class="cell"><span class="lbl">REGISTRATION LOCATION</span></div>
-    <div class="cell"><b class="lbl lbl-small">SHAMIM ARSHAD CLINIC</b></div>
+    <div class="cell"><b class="lbl lbl-small">SHAMIM ARSHAD POLYCLINIC</b></div>
     <div class="cell"></div>
     <div class="cell"></div>
   </div>
@@ -425,7 +619,7 @@ export const registerAppHandlers = (app: App) => {
     logEvent({ action: 'TESTS_BY_CATEGORY', payload: { category } })
     const rows = db
       .prepare(
-        'SELECT id, category, name, result, normal_value, required, sort_order, timestamp FROM test WHERE category = ? ORDER BY COALESCE(sort_order, 999999), id'
+        'SELECT id, category, name, result, normal_value, normal_spec, required, sort_order, timestamp FROM test WHERE category = ? ORDER BY COALESCE(sort_order, 999999), id'
       )
       .all(category) as any[]
     return rows.map((r) => ({
@@ -434,6 +628,7 @@ export const registerAppHandlers = (app: App) => {
       name: r.name,
       result: r.result,
       normal_value: r.normal_value,
+      normal_spec: r.normal_spec || null,
       required: !!r.required,
       sort_order: typeof r.sort_order === 'number' ? r.sort_order : null,
       timestamp: r.timestamp,
@@ -445,7 +640,7 @@ export const registerAppHandlers = (app: App) => {
     logEvent({ action: 'TESTS_BY_CATEGORY_NESTED', payload: { category } })
     const rows = db
       .prepare(
-        'SELECT id, category, name, result, normal_value, required, sort_order, parent_id, timestamp FROM test WHERE category = ? ORDER BY COALESCE(sort_order, 999999), COALESCE(parent_id, 0), id'
+        'SELECT id, category, name, result, normal_value, normal_spec, required, sort_order, parent_id, timestamp FROM test WHERE category = ? ORDER BY COALESCE(sort_order, 999999), COALESCE(parent_id, 0), id'
       )
       .all(category) as any[]
     const byId: Record<number, any> = {}
@@ -455,6 +650,7 @@ export const registerAppHandlers = (app: App) => {
       name: r.name,
       result: r.result,
       normal_value: r.normal_value,
+      normal_spec: r.normal_spec || null,
       required: !!r.required,
       sort_order: typeof r.sort_order === 'number' ? r.sort_order : null,
       parent_id: typeof r.parent_id === 'number' ? r.parent_id : null,
@@ -737,7 +933,7 @@ export const registerAppHandlers = (app: App) => {
     const db = getDb()
     const rows = db
       .prepare(
-        'SELECT id, category, name, result, normal_value, required, sort_order, parent_id, timestamp FROM test ORDER BY category, COALESCE(sort_order, 999999), COALESCE(parent_id, 0), id'
+        'SELECT id, category, name, result, normal_value, normal_spec, required, sort_order, parent_id, timestamp FROM test ORDER BY category, COALESCE(sort_order, 999999), COALESCE(parent_id, 0), id'
       )
       .all() as any[]
     const grouped: Record<string, any[]> = {}
@@ -748,6 +944,7 @@ export const registerAppHandlers = (app: App) => {
         name: r.name,
         result: r.result,
         normal_value: r.normal_value,
+        normal_spec: r.normal_spec || null,
         required: !!r.required,
         sort_order: typeof r.sort_order === 'number' ? r.sort_order : null,
         parent_id: typeof r.parent_id === 'number' ? r.parent_id : null,
@@ -792,7 +989,17 @@ export const registerAppHandlers = (app: App) => {
   })
   handle(
     'add-test',
-    ({ category, name, normal_value }: { category: string; name: string; normal_value?: string | null }) => {
+    ({
+      category,
+      name,
+      normal_value,
+      normal_spec,
+    }: {
+      category: string
+      name: string
+      normal_value?: string | null
+      normal_spec?: string | null
+    }) => {
       logEvent({ action: 'ADD_TEST', payload: { category, name } })
       const db = getDb()
       // Determine next sort_order within the category for root tests
@@ -801,9 +1008,9 @@ export const registerAppHandlers = (app: App) => {
         .get(category) as { maxo: number } | undefined
       const nextOrder = (maxRow?.maxo ?? -1) + 1
       const stmt = db.prepare(
-        'INSERT OR IGNORE INTO test (category, name, result, normal_value, required, parent_id, sort_order) VALUES (?, ?, ?, ?, 0, NULL, ?)'
+        'INSERT OR IGNORE INTO test (category, name, result, normal_value, normal_spec, required, parent_id, sort_order) VALUES (?, ?, ?, ?, ?, 0, NULL, ?)'
       )
-      const info = stmt.run(category, name, '', normal_value || '', nextOrder)
+      const info = stmt.run(category, name, '', normal_value || '', normal_spec || null, nextOrder)
       const idRow = db.prepare('SELECT id, required FROM test WHERE category = ? AND name = ?').get(category, name) as {
         id: number
         required: number
@@ -818,11 +1025,13 @@ export const registerAppHandlers = (app: App) => {
       parent_id,
       name,
       normal_value,
+      normal_spec,
     }: {
       category: string
       parent_id: number
       name: string
       normal_value?: string | null
+      normal_spec?: string | null
     }) => {
       logEvent({ action: 'ADD_CHILD_TEST', payload: { category, parent_id, name } })
       const db = getDb()
@@ -832,9 +1041,9 @@ export const registerAppHandlers = (app: App) => {
         .get(category, parent_id) as { maxo: number } | undefined
       const nextOrder = (maxRow?.maxo ?? -1) + 1
       const stmt = db.prepare(
-        'INSERT OR IGNORE INTO test (category, name, result, normal_value, required, parent_id, sort_order) VALUES (?, ?, ?, ?, 0, ?, ?)'
+        'INSERT OR IGNORE INTO test (category, name, result, normal_value, normal_spec, required, parent_id, sort_order) VALUES (?, ?, ?, ?, ?, 0, ?, ?)'
       )
-      const info = stmt.run(category, name, '', normal_value || '', parent_id, nextOrder)
+      const info = stmt.run(category, name, '', normal_value || '', normal_spec || null, parent_id, nextOrder)
       const idRow = db
         .prepare('SELECT id FROM test WHERE category = ? AND name = ? AND parent_id = ?')
         .get(category, name, parent_id) as { id: number } | undefined
@@ -848,6 +1057,16 @@ export const registerAppHandlers = (app: App) => {
     const info = stmt.run(normal_value || '', id)
     return { updated: info.changes === 1 }
   })
+  handle(
+    'update-test-normal-spec',
+    ({ id, normal_value, normal_spec }: { id: number; normal_value?: string | null; normal_spec?: string | null }) => {
+      logEvent({ action: 'UPDATE_TEST_NORMAL_SPEC', payload: { id } })
+      const db = getDb()
+      const stmt = db.prepare('UPDATE test SET normal_value = ?, normal_spec = ? WHERE id = ?')
+      const info = stmt.run(normal_value || '', normal_spec || null, id)
+      return { updated: info.changes === 1 }
+    }
+  )
   handle('update-test-required', ({ id, required }: { id: number; required: boolean }) => {
     logEvent({ action: 'UPDATE_TEST_REQUIRED', payload: { id, required } })
     const db = getDb()
@@ -869,7 +1088,7 @@ export const registerAppHandlers = (app: App) => {
     const db = getDb()
     const rows = db
       .prepare(
-        'SELECT id, category, name, normal_value, result, required, sort_order, parent_id FROM test WHERE name != ? ORDER BY category, COALESCE(sort_order, 999999), COALESCE(parent_id, 0), id'
+        'SELECT id, category, name, normal_value, normal_spec, result, required, sort_order, parent_id FROM test WHERE name != ? ORDER BY category, COALESCE(sort_order, 999999), COALESCE(parent_id, 0), id'
       )
       .all('_placeholder_') as any[]
     return rows.map((r) => ({
@@ -877,6 +1096,7 @@ export const registerAppHandlers = (app: App) => {
       category: r.category,
       name: r.name,
       normal_value: r.normal_value || '',
+      normal_spec: r.normal_spec || undefined,
       result: r.result || '',
       required: !!r.required,
       sort_order: typeof r.sort_order === 'number' ? r.sort_order : undefined,
@@ -887,33 +1107,112 @@ export const registerAppHandlers = (app: App) => {
     logEvent({ action: 'IMPORT_TESTS', payload: { count: payload.length } })
     const db = getDb()
     const insertWithId = db.prepare(
-      'INSERT OR IGNORE INTO test (id, category, name, result, normal_value, required, sort_order, parent_id) VALUES (@id, @category, @name, @result, @normal_value, @required, @sort_order, @parent_id)'
+      'INSERT OR IGNORE INTO test (id, category, name, result, normal_value, normal_spec, required, sort_order, parent_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
     )
     const insertNoId = db.prepare(
-      'INSERT OR IGNORE INTO test (category, name, result, normal_value, required, sort_order, parent_id) VALUES (@category, @name, @result, @normal_value, @required, @sort_order, @parent_id)'
+      'INSERT OR IGNORE INTO test (category, name, result, normal_value, normal_spec, required, sort_order, parent_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
     )
+    const updateById = db.prepare(
+      'UPDATE test SET category = ?, name = ?, result = ?, normal_value = ?, normal_spec = ?, required = ?, sort_order = ?, parent_id = ? WHERE id = ?'
+    )
+    const selectById = db.prepare('SELECT id FROM test WHERE id = ?')
+    const selectByKeyWithParent = db.prepare('SELECT id FROM test WHERE category = ? AND name = ? AND parent_id = ?')
+    const selectByKeyRoot = db.prepare('SELECT id FROM test WHERE category = ? AND name = ? AND parent_id IS NULL')
+
     let inserted = 0
+    let updated = 0
     for (const raw of payload) {
+      const category = raw.category?.trim() || ''
+      const name = raw.name?.trim() || ''
+      if (!category || !name) continue
+
       const base = {
-        category: raw.category?.trim() || '',
-        name: raw.name?.trim() || '',
+        category,
+        name,
         result: (raw.result || '').toString().trim(),
         normal_value: (raw.normal_value || '').toString().trim(),
         required: raw.required ? 1 : 0,
         sort_order: typeof (raw as any).sort_order === 'number' ? (raw as any).sort_order : null,
         parent_id: typeof (raw as any).parent_id === 'number' ? (raw as any).parent_id : null,
+        normal_spec: null as string | null,
       }
-      if (!base.category || !base.name) continue
-      let info: any
-      if (raw.id && Number.isFinite(raw.id) && raw.id > 0) {
-        info = insertWithId.run({ id: raw.id, ...base })
-        // If id already existed (ignored) but (category,name) not present, we may want to attempt without id; skip for simplicity.
+
+      // Normalize normal_spec: preserve text; if missing, set text
+      if (typeof (raw as any).normal_spec === 'string') {
+        try {
+          // store as-is
+          JSON.parse((raw as any).normal_spec)
+          base.normal_spec = (raw as any).normal_spec
+        } catch {
+          // invalid JSON string; set to text
+          base.normal_spec = JSON.stringify({ type: 'text' })
+        }
+      } else if ((raw as any).normal_spec && typeof (raw as any).normal_spec === 'object') {
+        try {
+          base.normal_spec = JSON.stringify((raw as any).normal_spec)
+        } catch {
+          base.normal_spec = JSON.stringify({ type: 'text' })
+        }
       } else {
-        info = insertNoId.run(base)
+        base.normal_spec = JSON.stringify({ type: 'text' })
       }
-      if (info?.changes === 1) inserted++
+
+      // Find existing row
+      let existing: { id: number } | undefined
+      if (raw.id && Number.isFinite(raw.id) && raw.id > 0) {
+        existing = selectById.get(raw.id) as any
+      }
+      if (!existing) {
+        if (base.parent_id != null) {
+          existing = selectByKeyWithParent.get(base.category, base.name, base.parent_id) as any
+        } else {
+          existing = selectByKeyRoot.get(base.category, base.name) as any
+        }
+      }
+
+      if (existing?.id) {
+        const info = updateById.run(
+          base.category,
+          base.name,
+          base.result,
+          base.normal_value,
+          base.normal_spec,
+          base.required,
+          base.sort_order,
+          base.parent_id,
+          existing.id
+        )
+        if (info?.changes === 1) updated++
+      } else {
+        let info: any
+        if (raw.id && Number.isFinite(raw.id) && raw.id > 0) {
+          info = insertWithId.run(
+            raw.id,
+            base.category,
+            base.name,
+            base.result,
+            base.normal_value,
+            base.normal_spec,
+            base.required,
+            base.sort_order,
+            base.parent_id
+          )
+        } else {
+          info = insertNoId.run(
+            base.category,
+            base.name,
+            base.result,
+            base.normal_value,
+            base.normal_spec,
+            base.required,
+            base.sort_order,
+            base.parent_id
+          )
+        }
+        if (info?.changes === 1) inserted++
+      }
     }
-    return { inserted, skipped: payload.length - inserted }
+    return { inserted, updated, skipped: Math.max(0, payload.length - inserted - updated) }
   })
   handle('export-logs', ({ format }: { format: 'json' | 'txt' }) => {
     const db = getDb()

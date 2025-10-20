@@ -149,7 +149,7 @@ html.dark .tests-form-block input[type='email'] {
   color: inherit;
   border: 1px solid #c6c6c6;
   border-radius: 6px;
-  width: 380px;
+  width: 480px;
   max-width: 90%;
   box-shadow: 0 6px 24px rgba(0, 0, 0, 0.25);
   padding: 18px 20px 16px;
@@ -174,7 +174,7 @@ html.dark .modal-dialog {
   align-items: flex-start;
 }
 .btn-danger {
-  background: #c62828;
+  background: #ff0000;
   color: #fff;
   border: 1px solid #a22020;
 }

@@ -14,6 +14,7 @@ interface TestItem {
   id: number
   name: string
   normal_value?: string | null
+  normal_spec?: string | null
   required?: boolean | null
   children?: TestItem[]
 }
@@ -121,6 +122,185 @@ export const PatientPage: React.FC = () => {
     )
   }
 
+  // Normal parsing for UI widgets
+  type Range = { min?: number; max?: number }
+  type NormalSpec =
+    | { type: 'none' }
+    | { type: 'options'; options: string[] }
+    | { type: 'range'; range: Range }
+    | { type: 'sexed-range'; male?: Range; female?: Range }
+  const parseNumber = (s: string): number | undefined => {
+    const m = (s || '').replace(/,/g, '').match(/[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?/)
+    if (!m) return undefined
+    const n = parseFloat(m[0])
+    return Number.isFinite(n) ? n : undefined
+  }
+  const parseRange = (raw: string): Range | null => {
+    const s = (raw || '').replace(/\s+/g, ' ').trim()
+    if (!s) return null
+    let m = s.match(/^>=\s*([\d.,]+)$/i)
+    if (m) return { min: parseNumber(m[1]) }
+    m = s.match(/^>\s*([\d.,]+)$/i)
+    if (m) return { min: parseNumber(m[1]) }
+    m = s.match(/^<=\s*([\d.,]+)$/i)
+    if (m) return { max: parseNumber(m[1]) }
+    m = s.match(/^<\s*([\d.,]+)$/i)
+    if (m) return { max: parseNumber(m[1]) }
+    m = s.match(/^([\d.,]+)\s*(?:-|–|—|to)\s*([\d.,]+)$/i)
+    if (m) return { min: parseNumber(m[1]), max: parseNumber(m[2]) }
+    m = s.match(/^([\d.,]+)\s*\+$/)
+    if (m) return { min: parseNumber(m[1]) }
+    const n = parseNumber(s)
+    if (n !== undefined) return { min: n, max: n }
+    return null
+  }
+  const parseOptions = (raw: string): string[] | null => {
+    const s = (raw || '').trim()
+    if (!s) return null
+    try {
+      const arr = JSON.parse(s)
+      if (Array.isArray(arr) && arr.every((x) => typeof x === 'string')) return arr as string[]
+    } catch {
+      /* not json */
+    }
+    if (/[|,/]/.test(s)) {
+      const parts = s
+        .split(/[|,/]/)
+        .map((p) => p.trim())
+        .filter(Boolean)
+      if (parts.length >= 2) return parts
+    }
+    if (/\bpositive\b|\bnegative\b/i.test(s)) return ['POSITIVE', 'NEGATIVE']
+    return null
+  }
+  const parseSexedRange = (raw: string): { male?: Range; female?: Range } | null => {
+    const s = (raw || '').replace(/;/g, ',')
+    const parts = s
+      .split(',')
+      .map((p) => p.trim())
+      .filter(Boolean)
+    if (!parts.length) return null
+    let male: Range | undefined
+    let female: Range | undefined
+    for (const p of parts) {
+      const pm = p.match(/^(m|male)\s*[:=]\s*(.+)$/i)
+      const pf = p.match(/^(f|female)\s*[:=]\s*(.+)$/i)
+      if (pm) male = parseRange(pm[2]) || male
+      else if (pf) female = parseRange(pf[2]) || female
+    }
+    if (!male && !female) return null
+    return { male, female }
+  }
+  const parseNormalSpec = (raw?: string | null): NormalSpec => {
+    const s = (raw || '').trim()
+    if (!s) return { type: 'none' }
+    // If structured JSON, honor it directly
+    if (s.startsWith('{')) {
+      try {
+        const o = JSON.parse(s)
+        if (o && typeof o === 'object' && typeof o.type === 'string') {
+          if (o.type === 'options' && Array.isArray(o.options)) {
+            if (o.options.every((x: any) => typeof x === 'string')) {
+              return { type: 'options', options: o.options as string[] }
+            }
+            if (o.options.every((x: any) => x && typeof x === 'object' && typeof x.label === 'string')) {
+              return { type: 'options', options: (o.options as any[]).map((x: any) => String(x.label)) }
+            }
+          }
+          if (o.type === 'range' && o.range && typeof o.range === 'object') {
+            return { type: 'range', range: { min: o.range.min, max: o.range.max } }
+          }
+          if (o.type === 'sexed-range') {
+            const male: Range | undefined = o.male ? { min: o.male.min, max: o.male.max } : undefined
+            const female: Range | undefined = o.female ? { min: o.female.min, max: o.female.max } : undefined
+            return { type: 'sexed-range', male, female }
+          }
+        }
+      } catch {
+        /* not JSON object we know */
+      }
+    }
+    // Fallback parsing from string
+    const sexed = parseSexedRange(s)
+    if (sexed) return { type: 'sexed-range', ...sexed }
+    const rng = parseRange(s)
+    if (rng) return { type: 'range', range: rng }
+    const opts = parseOptions(s)
+    if (opts) return { type: 'options', options: opts }
+    return { type: 'none' }
+  }
+  // Range-specific input is now a plain text field; no need to pick sex-specific range for slider bounds
+  const renderResultInput = (g: TestGroup, test: TestItem, checked: boolean, onChange: (val: string) => void) => {
+    if (!checked) return <div className="test-row-result-placeholder" />
+    // Prefer structured spec if available, otherwise fall back to legacy normal_value
+    const specSource = (test.normal_spec || test.normal_value || '') as string
+    const spec = parseNormalSpec(specSource)
+    if (spec.type === 'options') {
+      const options = spec.options
+      const value = g.selected[test.id]?.result || ''
+      return (
+        <select className="test-row-result" value={value} onChange={(e) => onChange(e.target.value)}>
+          <option value="">Select</option>
+          {options.map((opt) => (
+            <option key={opt} value={opt}>
+              {opt}
+            </option>
+          ))}
+        </select>
+      )
+    }
+    if (spec.type === 'range' || spec.type === 'sexed-range') {
+      // Always use a text input for ranges
+      return (
+        <input
+          type="text"
+          className="test-row-result"
+          placeholder="Result"
+          value={g.selected[test.id]?.result || ''}
+          onChange={(e) => onChange(e.target.value)}
+        />
+      )
+    }
+    return (
+      <input
+        type="text"
+        className="test-row-result"
+        placeholder="Result"
+        value={g.selected[test.id]?.result || ''}
+        onChange={(e) => onChange(e.target.value)}
+      />
+    )
+  }
+
+  // Human-readable formatter for displaying normal next to each row
+  // Formatting helpers are not used here; representation is shown via normal_value elsewhere
+  // const formatNormalDisplay = (test: TestItem): string => {
+  //   // 1) If a representation string exists, always prefer it
+  //   const rep = (test.normal_value || '').toString().trim()
+  //   if (rep) return rep
+  //   // 2) Else, derive from structured normal_spec when provided
+  //   const raw = (test.normal_spec || '').toString().trim()
+  //   if (!raw) return ''
+  //   try {
+  //     const o = JSON.parse(raw)
+  //     if (o && typeof o === 'object') {
+  //       if (o.type === 'options' && Array.isArray(o.options)) return o.options.join(' | ')
+  //       if (o.type === 'range') return fmtRange(o.range)
+  //       if (o.type === 'sexed-range') {
+  //         const m = fmtRange(o.male)
+  //         const f = fmtRange(o.female)
+  //         if (m && f) return `M: ${m}, F: ${f}`
+  //         if (m) return `M: ${m}`
+  //         if (f) return `F: ${f}`
+  //       }
+  //     }
+  //   } catch {
+  //     /* not JSON */
+  //   }
+  //   // 3) Fallback to raw content if not JSON
+  //   return raw
+  // }
+
   const addGroup = () => {
     setGroups((gs) => {
       if (gs.length) {
@@ -174,6 +354,7 @@ export const PatientPage: React.FC = () => {
                 name: ch.name,
                 result: upperPosNeg(g.selected[ch.id]?.result || ''),
                 normal: ch.normal_value || '',
+                normal_spec: ch.normal_spec || '',
               }))
             if (selectedChildren.length) {
               items.push({
@@ -188,6 +369,7 @@ export const PatientPage: React.FC = () => {
                 name: root.name,
                 result: upperPosNeg(g.selected[root.id]?.result || ''),
                 normal: root.normal_value || '',
+                normal_spec: root.normal_spec || '',
                 category: g.category,
               })
             }
@@ -374,18 +556,8 @@ export const PatientPage: React.FC = () => {
                                       <span>{t.name}</span>
                                     </div>
                                   </label>
-                                  {checked ? (
-                                    <input
-                                      type="text"
-                                      className="test-row-result"
-                                      placeholder="Result"
-                                      value={g.selected[t.id]?.result || ''}
-                                      onChange={(e) => updateResult(g.id, t.id, e.target.value)}
-                                    />
-                                  ) : (
-                                    <div className="test-row-result-placeholder" />
-                                  )}
-                                  <p>{t.normal_value || ''}</p>
+                                  {renderResultInput(g, t, checked, (v) => updateResult(g.id, t.id, v))}
+                                  <p>{t.normal_value}</p>
                                 </div>
                                 <p></p>
                               </div>
@@ -407,7 +579,7 @@ export const PatientPage: React.FC = () => {
                                   </div>
                                 </div>
                                 <div className="test-row-result-placeholder" />
-                                <p>{t.normal_value || ''}</p>
+                                <p>{t.normal_value}</p>
                               </div>
                               <p></p>
                             </div>
@@ -460,18 +632,8 @@ export const PatientPage: React.FC = () => {
                                         <span>{ch.name}</span>
                                       </div>
                                     </label>
-                                    {checked ? (
-                                      <input
-                                        type="text"
-                                        className="test-row-result"
-                                        placeholder="Result"
-                                        value={g.selected[ch.id]?.result || ''}
-                                        onChange={(e) => updateResult(g.id, ch.id, e.target.value)}
-                                      />
-                                    ) : (
-                                      <div className="test-row-result-placeholder" />
-                                    )}
-                                    <p>{ch.normal_value || ''}</p>
+                                    {renderResultInput(g, ch, checked, (v) => updateResult(g.id, ch.id, v))}
+                                    <p>{t.normal_value}</p>
                                   </div>
                                   <p></p>
                                 </div>

@@ -5,6 +5,19 @@ export const appIpcSchema = {
     args: z.tuple([]),
     return: z.string(),
   },
+  // One-time 2025 tests update: check/prompt/apply
+  'needs-tests-update-2025': {
+    args: z.tuple([]),
+    return: z.object({ needs: z.boolean() }),
+  },
+  'mark-tests-update-prompted-2025': {
+    args: z.tuple([]),
+    return: z.object({ ok: z.boolean() }),
+  },
+  'apply-tests-update-2025': {
+    args: z.tuple([]),
+    return: z.object({ inserted: z.number(), updated: z.number() }),
+  },
   'test-categories': {
     args: z.tuple([]),
     return: z.array(z.string()),
@@ -18,6 +31,7 @@ export const appIpcSchema = {
         name: z.string(),
         result: z.string().nullable().optional(),
         normal_value: z.string().nullable().optional(),
+        normal_spec: z.string().nullable().optional(),
         required: z.boolean().optional(),
         sort_order: z.number().nullable().optional(),
         timestamp: z.string().nullable().optional(),
@@ -137,6 +151,7 @@ export const appIpcSchema = {
             name: z.string(),
             result: z.string().nullable().optional(),
             normal_value: z.string().nullable().optional(),
+            normal_spec: z.string().nullable().optional(),
             required: z.boolean().optional(),
             sort_order: z.number().nullable().optional(),
             timestamp: z.string().nullable().optional(),
@@ -149,6 +164,7 @@ export const appIpcSchema = {
                   name: z.string(),
                   result: z.string().nullable().optional(),
                   normal_value: z.string().nullable().optional(),
+                  normal_spec: z.string().nullable().optional(),
                   required: z.boolean().optional(),
                   sort_order: z.number().nullable().optional(),
                   timestamp: z.string().nullable().optional(),
@@ -172,6 +188,7 @@ export const appIpcSchema = {
           name: z.string(),
           result: z.string().nullable().optional(),
           normal_value: z.string().nullable().optional(),
+          normal_spec: z.string().nullable().optional(),
           required: z.boolean().optional(),
           sort_order: z.number().nullable().optional(),
           timestamp: z.string().nullable().optional(),
@@ -183,6 +200,7 @@ export const appIpcSchema = {
                 name: z.string(),
                 result: z.string().nullable().optional(),
                 normal_value: z.string().nullable().optional(),
+                normal_spec: z.string().nullable().optional(),
                 required: z.boolean().optional(),
                 sort_order: z.number().nullable().optional(),
                 timestamp: z.string().nullable().optional(),
@@ -206,6 +224,7 @@ export const appIpcSchema = {
         category: z.string().min(1),
         name: z.string().min(1),
         normal_value: z.string().optional().nullable(),
+        normal_spec: z.string().optional().nullable(),
       }),
     ]),
     return: z.object({ id: z.number(), inserted: z.boolean(), required: z.boolean().optional() }),
@@ -213,6 +232,17 @@ export const appIpcSchema = {
   // New: update a test's normal value
   'update-test-normal': {
     args: z.tuple([z.object({ id: z.number(), normal_value: z.string().optional().nullable() })]),
+    return: z.object({ updated: z.boolean() }),
+  },
+  // New: update a test's normal value and spec
+  'update-test-normal-spec': {
+    args: z.tuple([
+      z.object({
+        id: z.number(),
+        normal_value: z.string().optional().nullable(),
+        normal_spec: z.string().optional().nullable(),
+      }),
+    ]),
     return: z.object({ updated: z.boolean() }),
   },
   // New: update a test's required flag
@@ -234,6 +264,7 @@ export const appIpcSchema = {
         category: z.string(),
         name: z.string(),
         normal_value: z.string().nullable().optional(),
+        normal_spec: z.string().nullable().optional(),
         result: z.string().nullable().optional(),
         required: z.boolean().optional(),
         sort_order: z.number().nullable().optional(),
@@ -250,6 +281,7 @@ export const appIpcSchema = {
           category: z.string().min(1),
           name: z.string().min(1),
           normal_value: z.string().optional().nullable(),
+          normal_spec: z.string().optional().nullable(),
           result: z.string().optional().nullable(),
           required: z.boolean().optional(),
           sort_order: z.number().nullable().optional(),
@@ -257,7 +289,7 @@ export const appIpcSchema = {
         })
       ),
     ]),
-    return: z.object({ inserted: z.number(), skipped: z.number() }),
+    return: z.object({ inserted: z.number(), updated: z.number().default(0), skipped: z.number() }),
   },
   // New: add a child test under a parent
   'add-child-test': {
@@ -267,6 +299,7 @@ export const appIpcSchema = {
         parent_id: z.number().min(1),
         name: z.string().min(1),
         normal_value: z.string().optional().nullable(),
+        normal_spec: z.string().optional().nullable(),
       }),
     ]),
     return: z.object({ id: z.number(), inserted: z.boolean() }),

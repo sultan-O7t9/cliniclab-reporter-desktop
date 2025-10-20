@@ -6,8 +6,8 @@ export class AppApi extends ConveyorApi {
   testsByCategory = (category: string) => this.invoke('tests-by-category', category)
   testsByCategoryNested = (category: string) => this.invoke('tests-by-category-nested', category)
   allTestsGrouped = () => this.invoke('all-tests-grouped')
-  addTest = (category: string, name: string, normal_value?: string | null) =>
-    this.invoke('add-test', { category, name, normal_value: normal_value ?? null })
+  addTest = (category: string, name: string, normal_value?: string | null, normal_spec?: string | null) =>
+    this.invoke('add-test', { category, name, normal_value: normal_value ?? null, normal_spec: normal_spec ?? null })
   saveTestRecord = (report: any) => this.invoke('save-test-record', report)
   printReport = (report: any) => this.invoke('print-report', { report })
   recentTestRecords = (limit: number) => this.invoke('recent-test-records', { limit })
@@ -17,10 +17,17 @@ export class AppApi extends ConveyorApi {
   openReportPreview = (report: any) => this.invoke('open-report-preview', { report })
   // keep above definitions for print/save/recent/search/getTestRecord
   addTestCategory = (category: string) => this.invoke('add-test-category', { category })
-  addChildTest = (category: string, parent_id: number, name: string, normal_value?: string | null) =>
-    this.invoke('add-child-test', { category, parent_id, name, normal_value })
+  addChildTest = (
+    category: string,
+    parent_id: number,
+    name: string,
+    normal_value?: string | null,
+    normal_spec?: string | null
+  ) => this.invoke('add-child-test', { category, parent_id, name, normal_value, normal_spec })
   updateTestNormal = (id: number, normal_value?: string | null) =>
     this.invoke('update-test-normal', { id, normal_value })
+  updateTestNormalSpec = (id: number, normal_value?: string | null, normal_spec?: string | null) =>
+    this.invoke('update-test-normal-spec', { id, normal_value, normal_spec })
   updateTestRequired = (id: number, required: boolean) => this.invoke('update-test-required', { id, required })
   maintenanceReseedTests = () => this.invoke('maintenance-reseed-tests')
   exportTests = () =>
@@ -29,6 +36,7 @@ export class AppApi extends ConveyorApi {
         category: string
         name: string
         normal_value?: string | null
+        normal_spec?: string | null
         result?: string | null
         required?: boolean
         sort_order?: number | null
@@ -40,6 +48,7 @@ export class AppApi extends ConveyorApi {
       category: string
       name: string
       normal_value?: string | null
+      normal_spec?: string | null
       result?: string | null
       required?: boolean
       sort_order?: number | null
@@ -68,4 +77,8 @@ export class AppApi extends ConveyorApi {
       rows: { id: number; ts: string; action: string; level: string; message?: string | null; payload?: any }[]
     }>
   resetDatabase = () => this.invoke('reset-database') as Promise<{ reset: boolean }>
+  // Tests update 2025 helpers
+  needsTestsUpdate2025 = () => this.invoke('needs-tests-update-2025') as Promise<{ needs: boolean }>
+  markTestsUpdatePrompted2025 = () => this.invoke('mark-tests-update-prompted-2025') as Promise<{ ok: boolean }>
+  applyTestsUpdate2025 = () => this.invoke('apply-tests-update-2025') as Promise<{ inserted: number; updated: number }>
 }
