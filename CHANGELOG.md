@@ -2,7 +2,14 @@
 
 All notable changes to the electron-react-app (ERA) are listed here.
 
+_Change Version in package.json_
+
 <br>
+
+## v12.0.0
+
+- Electron version upgraded to `v40`
+- Removed QR Code.
 
 ## v12.0.0
 

@@ -65,6 +65,7 @@ export default function LogsPage() {
     <div className="logs-page" style={{ padding: '16px' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, margin: '0 0 16px' }}>
         <h2 style={{ fontFamily: 'Cambria,serif', fontSize: 24, margin: 0, flex: '0 0 auto' }}>Logs</h2>
+        <p style={{ fontSize: 14, }}>v 1.4.0</p>
         <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
           <Button
             type="button"

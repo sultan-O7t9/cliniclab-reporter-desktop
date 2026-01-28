@@ -1,6 +1,6 @@
 {
   "name": "cliniclab-reporter",
-  "version": "1.3.2",
+  "version": "1.4.0",
   "description": "ClinicLab Reporter - clinical test & report management desktop app",
   "main": "./out/main/main.js",
   "license": "MIT",
@@ -27,12 +27,6 @@
   "repository": {
     "type": "git",
     "url": "https://github.com/guasam/electron-react-app"
-  },
-  "pnpm": {
-    "onlyBuiltDependencies": [
-      "electron",
-      "esbuild"
-    ]
   },
   "dependencies": {
     "@electron-toolkit/preload": "^3.0.2",
