@@ -577,7 +577,6 @@ export const registerAppHandlers = (app: App) => {
 <div class="subtitle2">OPPOSITE FAUJI TOWER EID GAAH CHOWK <b>KUNJAH</b></div>
 <div class="subtitle3">CELL NUMBER <b>--- ${PHONE_DISPLAY}</b></div>
 </div>
- ${qrDataUri ? `<img class="qr" src="${qrDataUri}" />` : ''}
 </div>
   <div class="patient-grid">
     <div class="cell"><span class="lbl">Patient Name</span></div>
